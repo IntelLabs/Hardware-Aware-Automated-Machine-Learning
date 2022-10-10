@@ -1,0 +1,2 @@
+nncf[torch]
+ipywidgets
