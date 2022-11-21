@@ -1,2 +1,3 @@
-# Hardware-Aware Automated Machine Learning
-Getting started guides for using Neural Network Compression Framework for enhanced OpenVINO™ inference
+# Hardware-Aware Automated Machine Learning Research
+
+Auxiliary resources for using AutoX - BootstrapNAS solutions in the Neural Network Compression Framework (NNCF).

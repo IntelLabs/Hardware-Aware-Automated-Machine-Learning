@@ -1,3 +1,2 @@
-# Example Jupyter Notebooks
+# BootstrapNAS Jupyter Notebooks
 
-TODO: describe each example presented here...

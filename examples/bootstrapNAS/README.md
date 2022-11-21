@@ -3,5 +3,3 @@ Automated Neural Architecture Search with BootstrapNAS
 </h1>
 
 This notebook demonstrates how to use [BootstrapNAS](https://arxiv.org/abs/2112.10878), a capability in NNCF to generate weight-sharing super-networks from pre-trained models. Once the super-network has been generated, BootstrapNAS can train it and search for efficient sub-networks. 
-
-\*BootstrapNAS is an **experimental feature** in NNCF.

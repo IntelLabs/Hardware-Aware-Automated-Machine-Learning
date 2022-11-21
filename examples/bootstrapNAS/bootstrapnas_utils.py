@@ -9,6 +9,8 @@
  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  See the License for the specific language governing permissions and
  limitations under the License.
+
+functions from OpenVINO notebooks.
 """
 
 import urllib
@@ -33,8 +35,6 @@ warnings.filterwarnings("ignore", "DeprecationWarning")
 
 __all__ = [
     "ResNet",
-    "resnet18_cifar10",
-    "resnet34_cifar10",
     "resnet50_cifar10",
 ]
 
@@ -551,12 +551,13 @@ def resnet50_cifar10(pretrained=False, progress=True, device="cpu", **kwargs):
 
 def create_folders_demo(base_model_name):
     from pathlib import Path
-    MODEL_DIR = Path("model")
+    # MODEL_DIR = Path("model")
+    MODEL_DIR = Path("../../models/pretrained")
     OUTPUT_DIR = Path("output")
     DATA_DIR = Path("data")
     BASE_MODEL_NAME = base_model_name
     OUTPUT_DIR.mkdir(exist_ok=True)
-    MODEL_DIR.mkdir(exist_ok=True)
+    # MODEL_DIR.mkdir(exist_ok=True)
     DATA_DIR.mkdir(exist_ok=True)
     fp32_pth_path = Path(MODEL_DIR / (BASE_MODEL_NAME + "_fp32")).with_suffix(".pth")
     model_onnx_path = Path(OUTPUT_DIR / (BASE_MODEL_NAME)).with_suffix(".onnx")
