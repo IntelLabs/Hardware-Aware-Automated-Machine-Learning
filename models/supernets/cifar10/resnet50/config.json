@@ -51,12 +51,9 @@
             }
         },
         "search": {
-            "algorithm": "NSGA2",
             "batchnorm_adaptation": {
                 "num_bn_adaptation_samples": 6000
             },
-            "num_evals": 3000,
-            "population": 50,
             "ref_acc": 93.65
         }
     }
