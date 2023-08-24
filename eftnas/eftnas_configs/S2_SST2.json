@@ -1,0 +1,135 @@
+{
+    "input_info": [
+        {
+            "sample_size": [1, 128],
+            "type": "long",
+            "keyword": "input_ids"
+        },
+        {
+            "sample_size": [1, 128],
+            "type": "long",
+            "keyword": "token_type_ids"
+        },
+        {
+            "sample_size": [1, 128],
+            "type": "long",
+            "keyword": "attention_mask"
+        }
+    ],
+    "bootstrapNAS": {
+        "training": {
+            "algorithm": "progressive_shrinking",
+            "progressivity_of_elasticity": ["width"],
+            "batchnorm_adaptation": {
+                "num_bn_adaptation_samples": 0
+            },
+            "schedule": {
+                "list_stage_descriptions": [
+                    {"train_dims": ["width"], "epochs": 8, "depth_indicator": 1, "width_indicator": 4, "init_lr": 3e-5, "epochs_lr": 8, "sample_rate": 1}
+                ]
+            },
+            "elasticity": {
+                "available_elasticity_dims": ["width"],
+                "width": {
+                    "overwrite_groups": [
+                        [
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0"
+                        ],
+                        [
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0",
+                        ],
+                        [
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0",
+                        ],
+                        [
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0"
+                        ],
+                        [
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0",
+                        ],
+                        [
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0",
+                        ],
+                        [
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0",
+                        ],
+                        [
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0",
+                        ],
+                        ["BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                    ],
+                    "overwrite_groups_widths": [
+                        [512, 256], [512, 64], [512, 128], [512, 128], [512, 128], [512, 64], [512, 192], [512, 128], [2048, 1594, 1517, 1434], [2048, 1585, 1496, 1406], [2048, 1508, 1441, 1362], [2048, 1483, 1387, 1305], [2048, 1466, 1358, 1269], [2048, 1335, 1239, 1150], [2048, 1121, 1016, 902], [2048, 957, 861, 752]
+                    ],
+                    "add_dynamic_inputs": [
+                        "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "BertForSequenceClassification/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                    ]
+                },
+            },
+        },
+        "search": {
+            "algorithm": "NSGA2",
+            "batchnorm_adaptation": {
+                "num_bn_adaptation_samples": 0
+            },
+            "num_evals": 1000,
+            "population": 40,
+            "ref_acc": 92.32 // accuracy
+        }
+    },
+    "compression": [
+        {
+            "algorithm": "movement_sparsity",
+            "params": {
+                "warmup_start_epoch": 1,
+                "warmup_end_epoch": 3,
+                "importance_regularization_factor": 0.02,
+                "enable_structured_masking": true
+            },
+            "sparse_structure_by_scopes": [
+                {"mode": "block", "sparse_factors": [32, 32], "target_scopes": "{re}.*BertAttention.*"},
+                {"mode": "per_dim", "axis": 0, "target_scopes": "{re}.*BertIntermediate.*"},
+                {"mode": "per_dim", "axis": 1, "target_scopes": "{re}.*BertOutput.*"}
+            ],
+            "ignored_scopes": [
+                "{re}.*NNCFEmbedding.*",
+                "{re}.*LayerNorm.*",
+                "{re}.*pooler.*",
+                "{re}.*classifier.*"]
+        }
+    ],
+    "model_name_or_path": "../eftnas_results/S2_SST2/pretrain_weight", // 93.23
+    "kd_teacher_model": "JeremiahZ/bert-base-uncased-sst2", //"yoshitomo-matsubara/bert-large-uncased-sst2",
+    "movement_sparsity_total_epochs": 6,
+    "reorg_cache_model": "../eftnas_results/S2_SST2/movement_sparsity_0/pytorch_model.bin",
+}

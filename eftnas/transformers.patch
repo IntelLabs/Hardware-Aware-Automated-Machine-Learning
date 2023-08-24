@@ -1,0 +1,2064 @@
+diff --git a/examples/pytorch/language-modeling/run_mlm.py b/examples/pytorch/language-modeling/run_mlm.py
+index 9bb52f797..359c9c8ba 100755
+--- a/examples/pytorch/language-modeling/run_mlm.py
++++ b/examples/pytorch/language-modeling/run_mlm.py
+@@ -25,13 +25,18 @@ import logging
+ import math
+ import os
+ import sys
++from copy import deepcopy
+ from dataclasses import dataclass, field
++from functools import partial
+ from itertools import chain
+ from typing import Optional
+ 
++import torch
+ import datasets
+ import evaluate
+-from datasets import load_dataset
++from nncf import NNCFConfig
++from nncf.experimental.torch.nas.bootstrapNAS.training.progressive_shrinking_controller import ProgressiveShrinkingController
++from nncf.experimental.torch.nas.bootstrapNAS import SearchAlgorithm
+ 
+ import transformers
+ from transformers import (
+@@ -238,6 +243,19 @@ def main():
+     else:
+         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+ 
++    # overwrite total epochs & model_name_or_path
++    if training_args.nncf_config is not None:
++        tmp_nncf_config = NNCFConfig.from_json(training_args.nncf_config)
++        if tmp_nncf_config.get("movement_sparsity_total_epochs", None):
++            training_args.num_train_epochs = tmp_nncf_config["movement_sparsity_total_epochs"]
++        if tmp_nncf_config.get("model_name_or_path", None):
++            model_args.model_name_or_path = tmp_nncf_config["model_name_or_path"]
++        if tmp_nncf_config.get("kd_temperature", None):
++            training_args.kd_temperatue = tmp_nncf_config["kd_temperature"]
++        data_ratio = tmp_nncf_config.get("data_ratio", 1.0)
++        tokenized_datasets_cache_file = tmp_nncf_config.get("tokenized_datasets_cache_file", None)
++        tokenized_datasets_group_txt_cache_file = tmp_nncf_config.get("tokenized_datasets_group_txt_cache_file", None)
++
+     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
+     # information sent is the one passed as arguments along with your Python/PyTorch versions.
+     send_example_telemetry("run_mlm", model_args, data_args)
+@@ -296,14 +314,31 @@ def main():
+     # In distributed training, the load_dataset function guarantee that only one local process can concurrently
+     # download the dataset.
+     if data_args.dataset_name is not None:
+-        # Downloading and loading a dataset from the hub.
+-        raw_datasets = load_dataset(
+-            data_args.dataset_name,
+-            data_args.dataset_config_name,
+-            cache_dir=model_args.cache_dir,
+-            use_auth_token=True if model_args.use_auth_token else None,
+-            streaming=data_args.streaming,
+-        )
++        # concat bookcorpus and wikipedia
++        if data_args.dataset_name == 'bookcorpus_wikipedia': # use a list to save
++            from datasets import concatenate_datasets, load_dataset
++            from datasets.dataset_dict import DatasetDict
++            bookcorpus_val = load_dataset("bookcorpus", split=f"train[:{int(data_args.validation_split_percentage * data_ratio)}%]", cache_dir=model_args.cache_dir)
++            bookcorpus_train = load_dataset("bookcorpus", split=f"train[-{int((100 - data_args.validation_split_percentage) * data_ratio)}%:]", cache_dir=model_args.cache_dir)
++            wiki_val = load_dataset("wikipedia", "20220301.en", split=f"train[:{int(data_args.validation_split_percentage * data_ratio)}%]", cache_dir=model_args.cache_dir)
++            wiki_train = load_dataset("wikipedia", "20220301.en", split=f"train[-{int((100 - data_args.validation_split_percentage) * data_ratio)}%:]", cache_dir=model_args.cache_dir)
++            wiki_val = wiki_val.remove_columns([col for col in wiki_val.column_names if col != "text"])  # only keep the 'text' column
++            wiki_train = wiki_train.remove_columns([col for col in wiki_train.column_names if col != "text"])  # only keep the 'text' column
++
++            assert bookcorpus_val.features.type == wiki_val.features.type
++            assert bookcorpus_train.features.type == wiki_train.features.type
++            raw_datasets = DatasetDict()
++            raw_datasets['train'] = concatenate_datasets([bookcorpus_train, wiki_train])
++            raw_datasets['validation'] = concatenate_datasets([bookcorpus_val, wiki_val])
++        else:
++            # Downloading and loading a dataset from the hub.
++            raw_datasets = load_dataset(
++                data_args.dataset_name,
++                data_args.dataset_config_name,
++                cache_dir=model_args.cache_dir,
++                use_auth_token=True if model_args.use_auth_token else None,
++                streaming=data_args.streaming,
++            )
+         if "validation" not in raw_datasets.keys():
+             raw_datasets["validation"] = load_dataset(
+                 data_args.dataset_name,
+@@ -396,19 +431,110 @@ def main():
+             "You can do it from another script, save it, and load it from here, using --tokenizer_name."
+         )
+ 
+-    if model_args.model_name_or_path:
+-        model = AutoModelForMaskedLM.from_pretrained(
+-            model_args.model_name_or_path,
+-            from_tf=bool(".ckpt" in model_args.model_name_or_path),
+-            config=config,
++    kd_teacher_model = None
++    if training_args.kd_teacher_model:
++        kd_teacher_model = AutoModelForMaskedLM.from_pretrained(
++            training_args.kd_teacher_model,
++            from_tf=bool(".ckpt" in training_args.kd_teacher_model),
+             cache_dir=model_args.cache_dir,
+-            revision=model_args.model_revision,
+-            use_auth_token=True if model_args.use_auth_token else None,
+             low_cpu_mem_usage=model_args.low_cpu_mem_usage,
+         )
++        kd_teacher_model.eval()
++
++    nncf_config = None
++    create_importance_mask_fn = None
++    if training_args.nncf_config is not None:
++        nncf_config = NNCFConfig.from_json(training_args.nncf_config)
++
++        if nncf_config.get("log_dir") is None:
++            nncf_config["log_dir"] = training_args.output_dir
++
++        if not os.path.exists(training_args.output_dir) and training_args.local_rank in [-1, 0]:
++            os.makedirs(nncf_config["log_dir"])
++
++        if nncf_config.get("kd_teacher_model", None):
++            kd_teacher_model = AutoModelForMaskedLM.from_pretrained(
++                nncf_config["kd_teacher_model"],
++                from_tf=bool(".ckpt" in nncf_config["kd_teacher_model"]),
++                cache_dir=model_args.cache_dir,
++            )
++            kd_teacher_model.eval()
++
++        if nncf_config.get("kd_mode", None):
++            training_args.kd_mode = nncf_config["kd_mode"]
++
++        # split nncf_config --> bnas + movement sparsity
++        compression_algo_names = [algo['algorithm'] for algo in nncf_config.get('compression', [])]
++        if 'movement_sparsity' in compression_algo_names:
++            sparsity_nncf_config = deepcopy(nncf_config)
++            if 'bootstrapNAS' in sparsity_nncf_config:
++                del sparsity_nncf_config['bootstrapNAS']
++
++            def generate_importance_mask_weight(model_state_dict, debug_mode=False, save_folder='movement_sparsity',
++                                                resume_model=None, bnas_training_ctrl=None):
++                # create movement sparsity ctrl
++                sparsity_ctrl, sparsity_model = AutoModelForMaskedLM.from_pretrained(
++                    model_args.model_name_or_path,
++                    from_tf=bool(".ckpt" in model_args.model_name_or_path),
++                    config=config,
++                    cache_dir=model_args.cache_dir,
++                    revision=model_args.model_revision,
++                    use_auth_token=True if model_args.use_auth_token else None,
++                    low_cpu_mem_usage=model_args.low_cpu_mem_usage,
++                    nncf_config=sparsity_nncf_config,
++                    nncf_eval=nncf_config is not None and training_args.do_eval and not training_args.do_train,
++                )
++                sparsity_model.load_state_dict(model_state_dict, strict=False) # use current bnas model state dict
++
++                sparsity_trainer = Trainer(
++                    model=sparsity_model,
++                    args=training_args,
++                    train_dataset=train_dataset if training_args.do_train else None,
++                    eval_dataset=eval_dataset if training_args.do_eval else None,
++                    tokenizer=tokenizer,
++                    data_collator=data_collator,
++                    compute_metrics=compute_metrics,
++                    compression_ctrl=sparsity_ctrl,
++                    kd_teacher_model=kd_teacher_model,
++                    debug_mode=debug_mode,
++                    resume_model=resume_model
++                )
++
++                # update threshold & generate search space
++                if debug_mode:
++                    import torch
++                    resume_state_dict = torch.load(resume_model, map_location=sparsity_model.device)
++                    # function to compute macs for a specific importance thre
++                    # generate_importance_thre_map_macs_table(bnas_training_ctrl, sparsity_ctrl, resume_state_dict, training_args.output_dir)
++
++                sparsity_trainer.train()
++                sparsity_trainer.save_model(os.path.join(training_args.output_dir, save_folder))
++                return sparsity_model
++
++            create_importance_mask_fn = generate_importance_mask_weight
++
++    retval = AutoModelForMaskedLM.from_pretrained(
++        model_args.model_name_or_path,
++        from_tf=bool(".ckpt" in model_args.model_name_or_path),
++        config=config,
++        cache_dir=model_args.cache_dir,
++        revision=model_args.model_revision,
++        use_auth_token=True if model_args.use_auth_token else None,
++        low_cpu_mem_usage=model_args.low_cpu_mem_usage,
++        nncf_config=nncf_config,
++        nncf_eval=nncf_config is not None and training_args.do_eval and not training_args.do_train
++    )
++    if nncf_config is None:
++        model = retval
++        compression_ctrl = None
+     else:
+-        logger.info("Training new model from scratch")
+-        model = AutoModelForMaskedLM.from_config(config)
++        compression_ctrl, model = retval
++        if isinstance(compression_ctrl, ProgressiveShrinkingController):
++            compression_ctrl.multi_elasticity_handler.width_handler.create_importance_mask_fn = create_importance_mask_fn
++        if nncf_config.get("reorg_cache_model", None) and create_importance_mask_fn is not None:
++            compression_ctrl.multi_elasticity_handler.width_handler.create_importance_mask_fn = partial(create_importance_mask_fn,
++                                                                                                        debug_mode=True,
++                                                                                                        resume_model=nncf_config["reorg_cache_model"])
+ 
+     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
+     # on a small vocab and want a smaller embedding size, remove this test.
+@@ -484,21 +610,30 @@ def main():
+             return tokenizer(examples[text_column_name], return_special_tokens_mask=True)
+ 
+         with training_args.main_process_first(desc="dataset map tokenization"):
+-            if not data_args.streaming:
+-                tokenized_datasets = raw_datasets.map(
+-                    tokenize_function,
+-                    batched=True,
+-                    num_proc=data_args.preprocessing_num_workers,
+-                    remove_columns=column_names,
+-                    load_from_cache_file=not data_args.overwrite_cache,
+-                    desc="Running tokenizer on every text in dataset",
+-                )
++            if tokenized_datasets_cache_file:
++                assert tokenized_datasets_cache_file.endswith(f"{data_args.dataset_name}_{data_ratio}.pth")
++                print(f'loading tokenized_datasets from cache file: {tokenized_datasets_cache_file}')
++                tokenized_datasets = torch.load(tokenized_datasets_cache_file)
++                print(f'Done')
+             else:
+-                tokenized_datasets = raw_datasets.map(
+-                    tokenize_function,
+-                    batched=True,
+-                    remove_columns=column_names,
+-                )
++                if not data_args.streaming:
++                    tokenized_datasets = raw_datasets.map(
++                        tokenize_function,
++                        batched=True,
++                        num_proc=data_args.preprocessing_num_workers,
++                        remove_columns=column_names,
++                        load_from_cache_file=not data_args.overwrite_cache,
++                        desc="Running tokenizer on every text in dataset",
++                    )
++                    os.system(f'mkdir -p {training_args.output_dir}')
++                    torch.save(tokenized_datasets, os.path.join(training_args.output_dir, f"{data_args.dataset_name}_{data_ratio}.pth"))
++                    print(f'save tokenized_datasets to {os.path.join(training_args.output_dir, f"{data_args.dataset_name}_{data_ratio}.pth")}')
++                else:
++                    tokenized_datasets = raw_datasets.map(
++                        tokenize_function,
++                        batched=True,
++                        remove_columns=column_names,
++                    )
+ 
+         # Main data processing function that will concatenate all texts from our dataset and generate chunks of
+         # max_seq_length.
+@@ -525,19 +660,28 @@ def main():
+         # https://huggingface.co/docs/datasets/package_reference/main_classes.html#datasets.Dataset.map
+ 
+         with training_args.main_process_first(desc="grouping texts together"):
+-            if not data_args.streaming:
+-                tokenized_datasets = tokenized_datasets.map(
+-                    group_texts,
+-                    batched=True,
+-                    num_proc=data_args.preprocessing_num_workers,
+-                    load_from_cache_file=not data_args.overwrite_cache,
+-                    desc=f"Grouping texts in chunks of {max_seq_length}",
+-                )
++            if tokenized_datasets_group_txt_cache_file:
++                assert tokenized_datasets_group_txt_cache_file.endswith(f"{data_args.dataset_name}_group_{max_seq_length}_{data_ratio}.pth")
++                print(f'loading tokenized_datasets from cache file: {tokenized_datasets_group_txt_cache_file}')
++                tokenized_datasets = torch.load(tokenized_datasets_group_txt_cache_file)
++                print(f'Done')
+             else:
+-                tokenized_datasets = tokenized_datasets.map(
+-                    group_texts,
+-                    batched=True,
+-                )
++                if not data_args.streaming:
++                    tokenized_datasets = tokenized_datasets.map(
++                        group_texts,
++                        batched=True,
++                        num_proc=data_args.preprocessing_num_workers,
++                        load_from_cache_file=not data_args.overwrite_cache,
++                        desc=f"Grouping texts in chunks of {max_seq_length}",
++                    )
++                    os.system(f'mkdir -p {training_args.output_dir}')
++                    torch.save(tokenized_datasets, os.path.join(training_args.output_dir, f"{data_args.dataset_name}_group_{max_seq_length}_{data_ratio}.pth"))
++                    print(f'save tokenized_datasets to {os.path.join(training_args.output_dir, f"{data_args.dataset_name}_group_{max_seq_length}_{data_ratio}.pth")}')
++                else:
++                    tokenized_datasets = tokenized_datasets.map(
++                        group_texts,
++                        batched=True,
++                    )
+ 
+     if training_args.do_train:
+         if "train" not in tokenized_datasets:
+@@ -596,6 +740,9 @@ def main():
+         preprocess_logits_for_metrics=preprocess_logits_for_metrics
+         if training_args.do_eval and not is_torch_tpu_available()
+         else None,
++        compression_ctrl=compression_ctrl,
++        kd_teacher_model=kd_teacher_model,
++        sandwich_rule=True,
+     )
+ 
+     # Training
+@@ -606,9 +753,10 @@ def main():
+         elif last_checkpoint is not None:
+             checkpoint = last_checkpoint
+         train_result = trainer.train(resume_from_checkpoint=checkpoint)
++        if nncf_config is not None and isinstance(compression_ctrl, ProgressiveShrinkingController):
++            train_result, model, elasticity_ctrl = train_result
+         trainer.save_model()  # Saves the tokenizer too for easy upload
+         metrics = train_result.metrics
+-
+         max_train_samples = (
+             data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
+         )
+@@ -618,6 +766,30 @@ def main():
+         trainer.save_metrics("train", metrics)
+         trainer.save_state()
+ 
++        if nncf_config is not None and isinstance(compression_ctrl, ProgressiveShrinkingController) and training_args.do_search:
++            resuming_checkpoint_path = None
++            if resuming_checkpoint_path is None:
++                search_algo = SearchAlgorithm.from_config(model, elasticity_ctrl, nncf_config)
++            else:
++                search_algo = SearchAlgorithm.from_checkpoint(model, elasticity_ctrl, None, resuming_checkpoint_path)
++
++            def validate_model_func(model_, dataset_, eval_metric_name = 'eval_accuracy'):
++                #trainer.model will be used to evaluate(trainer.model = model)
++                metrics = trainer.evaluate(eval_dataset=dataset_)
++                return metrics[eval_metric_name] * 100
++
++            eval_metric_name = nncf_config.get("bootstrapNAS", {}).get("search", {}).get("eval_metric_name", "eval_accuracy")
++
++            elasticity_ctrl, best_config, performance_metrics = search_algo.run(partial(validate_model_func, eval_metric_name=eval_metric_name),
++                                                                                eval_dataset,
++                                                                                training_args.output_dir)
++            logger.info("Best config: {best_config}".format(best_config=best_config))
++            logger.info("Performance metrics: {performance_metrics}".format(performance_metrics=performance_metrics))
++
++            search_algo.visualize_search_progression()
++            search_algo.search_progression_to_csv()
++            search_algo.evaluators_to_csv()
++
+     # Evaluation
+     if training_args.do_eval:
+         logger.info("*** Evaluate ***")
+diff --git a/examples/pytorch/question-answering/run_qa.py b/examples/pytorch/question-answering/run_qa.py
+index c760e51d8..79002a3fa 100755
+--- a/examples/pytorch/question-answering/run_qa.py
++++ b/examples/pytorch/question-answering/run_qa.py
+@@ -21,15 +21,31 @@ Fine-tuning the library models for question answering using a slightly adapted v
+ import logging
+ import os
+ import sys
++from copy import deepcopy
+ from dataclasses import dataclass, field
++from functools import partial
+ from typing import Optional
+ 
+ import datasets
++import torch
+ import evaluate
+ from datasets import load_dataset
+ from trainer_qa import QuestionAnsweringTrainer
+ from utils_qa import postprocess_qa_predictions
+ 
++from torch import onnx
++
++from nncf import NNCFConfig
++from nncf.config.structures import QuantizationRangeInitArgs
++from nncf.experimental.torch.sparsity.movement.algo import MovementSparsityController
++from nncf.experimental.torch.nas.bootstrapNAS.training.progressive_shrinking_controller import ProgressiveShrinkingController
++from nncf.experimental.torch.nas.bootstrapNAS.search.supernet import TrainedSuperNet
++from nncf.experimental.torch.nas.bootstrapNAS import SearchAlgorithm
++from transformers.trainer_utils import get_last_checkpoint, IntervalStrategy
++from nncf.torch import create_compressed_model
++from nncf.torch.initialization import PTInitializingDataLoader
++
++
+ import transformers
+ from transformers import (
+     AutoConfig,
+@@ -43,6 +59,7 @@ from transformers import (
+     default_data_collator,
+     set_seed,
+ )
++from transformers.trainer import get_train_dataloader_for_init
+ from transformers.trainer_utils import get_last_checkpoint
+ from transformers.utils import check_min_version, send_example_telemetry
+ from transformers.utils.versions import require_version
+@@ -214,6 +231,55 @@ class DataTrainingArguments:
+                 assert extension in ["csv", "json"], "`test_file` should be a csv or a json file."
+ 
+ 
++def test_train_supernet_interface(trainer: QuestionAnsweringTrainer):
++    # test bert
++    from pathlib import Path
++
++    import jstyleson as json
++    from nncf.common.utils.os import safe_open
++    from nncf.experimental.torch.nas.bootstrapNAS.search.supernet import TrainedSuperNet
++
++    from transformers import AutoModelForQuestionAnswering
++
++    model_name = "bert-large-uncased-whole-word-masking"
++    supernet_weights_path = "../supernets/transformers/bert_squad_nas/best_result/supernet_weights.pth"
++    supernet_elasticity_path = (
++        "../supernets/transformers/bert_squad_nas/best_result/elasticity_state.pth"
++    )
++    pareto_front_subnets_path = '../supernets/transformers/bert_squad_nas/best_result/pareto_front_subnets.pth'
++    nncf_config_path = "../supernets/transformers/bert_squad_nas/best_result/nncf_config.json"
++
++    model = AutoModelForQuestionAnswering.from_pretrained(model_name)
++    nncf_config_path = Path(nncf_config_path).resolve()
++    with safe_open(nncf_config_path) as f:
++        loaded_json = json.load(f)
++    nncf_config = NNCFConfig.from_dict(loaded_json)
++    nncf_config.device = 'cuda' if torch.cuda.is_available() else 'cpu'
++    train_supernet = TrainedSuperNet.from_checkpoint(model, nncf_config, supernet_elasticity_path, supernet_weights_path)
++    train_supernet._model.to(nncf_config.device)
++
++    # the model with nncf wrapper and clean version should get the same f1-score
++    check_idxs = 5
++    pareto_front_info = torch.load(pareto_front_subnets_path, map_location='cpu')
++    for check_idx in range(check_idxs):
++        train_supernet.activate_config(pareto_front_info[check_idx]['subnet_config'])
++        # model with nncf wrapper
++        print(f'MACs: {train_supernet.get_macs_for_active_config()}')
++        # trainer.model = train_supernet._model
++        # metrics = trainer.evaluate()
++        # print(metrics)
++
++        # clean version
++        print('clean model')
++        clean_subnet = train_supernet.get_clean_subnet()
++        trainer.model = clean_subnet.to(nncf_config.device)
++        metrics = trainer.evaluate()
++        print(metrics)
++
++        print(f'info: {pareto_front_info[check_idx]}')
++        import pdb;pdb.set_trace()
++
++
+ def main():
+     # See all possible arguments in src/transformers/training_args.py
+     # or by passing the --help flag to this script.
+@@ -227,6 +293,16 @@ def main():
+     else:
+         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+ 
++    # overwrite total epochs & model_name_or_path
++    if training_args.nncf_config is not None:
++        tmp_nncf_config = NNCFConfig.from_json(training_args.nncf_config)
++        if tmp_nncf_config.get("movement_sparsity_total_epochs", None):
++            training_args.num_train_epochs = tmp_nncf_config["movement_sparsity_total_epochs"]
++        if tmp_nncf_config.get("model_name_or_path", None):
++            model_args.model_name_or_path = tmp_nncf_config["model_name_or_path"]
++        if tmp_nncf_config.get("kd_temperature", None):
++            training_args.kd_temperatue = tmp_nncf_config["kd_temperature"]
++
+     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
+     # information sent is the one passed as arguments along with your Python/PyTorch versions.
+     send_example_telemetry("run_qa", model_args, data_args)
+@@ -331,14 +407,7 @@ def main():
+         revision=model_args.model_revision,
+         use_auth_token=True if model_args.use_auth_token else None,
+     )
+-    model = AutoModelForQuestionAnswering.from_pretrained(
+-        model_args.model_name_or_path,
+-        from_tf=bool(".ckpt" in model_args.model_name_or_path),
+-        config=config,
+-        cache_dir=model_args.cache_dir,
+-        revision=model_args.model_revision,
+-        use_auth_token=True if model_args.use_auth_token else None,
+-    )
++
+ 
+     # Tokenizer check: this script requires a fast tokenizer.
+     if not isinstance(tokenizer, PreTrainedTokenizerFast):
+@@ -603,6 +672,128 @@ def main():
+     def compute_metrics(p: EvalPrediction):
+         return metric.compute(predictions=p.predictions, references=p.label_ids)
+ 
++    kd_teacher_model = None
++    if training_args.kd_teacher_model:
++        kd_teacher_model = AutoModelForQuestionAnswering.from_pretrained(
++            training_args.kd_teacher_model,
++            from_tf=bool(".ckpt" in training_args.kd_teacher_model),
++            cache_dir=model_args.cache_dir,
++        )
++        kd_teacher_model.eval()
++
++    nncf_config = None
++    create_importance_mask_fn = None
++    if training_args.nncf_config is not None:
++        nncf_config = NNCFConfig.from_json(training_args.nncf_config)
++        if nncf_config.get("log_dir") is None:
++            nncf_config["log_dir"] = training_args.output_dir
++        if not os.path.exists(training_args.output_dir) and training_args.local_rank in [-1, 0]:
++            os.makedirs(nncf_config["log_dir"])
++
++        # overwrite based on nncf config
++        if nncf_config.get("kd_teacher_model", None):
++            kd_teacher_model = AutoModelForQuestionAnswering.from_pretrained(
++                nncf_config["kd_teacher_model"],
++                from_tf=bool(".ckpt" in nncf_config["kd_teacher_model"]),
++                cache_dir=model_args.cache_dir,
++            )
++            kd_teacher_model.eval()
++
++        if nncf_config.get("kd_mode", None):
++            training_args.kd_mode = nncf_config["kd_mode"]
++
++        # split nncf_config --> bnas + movement sparsity
++        compression_algo_names = [algo['algorithm'] for algo in nncf_config.get('compression', [])]
++        if 'movement_sparsity' in compression_algo_names:
++            sparsity_nncf_config = deepcopy(nncf_config)
++            if 'bootstrapNAS' in sparsity_nncf_config:
++                del sparsity_nncf_config['bootstrapNAS']
++
++            def generate_importance_mask_weight(model_state_dict, debug_mode=False, save_folder='movement_sparsity',
++                                                resume_model=None, bnas_training_ctrl=None):
++                # create movement sparsity ctrl
++                sparsity_ctrl, sparsity_model = AutoModelForQuestionAnswering.from_pretrained(
++                    model_args.model_name_or_path,
++                    from_tf=bool(".ckpt" in model_args.model_name_or_path),
++                    config=config,
++                    cache_dir=model_args.cache_dir,
++                    revision=model_args.model_revision,
++                    use_auth_token=True if model_args.use_auth_token else None,
++                    nncf_config=sparsity_nncf_config,
++                    nncf_eval=nncf_config is not None and training_args.do_eval and not training_args.do_train,
++                )
++                sparsity_model.load_state_dict(model_state_dict, strict=False) # use current bnas model state dict
++
++                sparsity_trainer = QuestionAnsweringTrainer(
++                    model=sparsity_model,
++                    args=training_args,
++                    train_dataset=train_dataset if training_args.do_train else None,
++                    eval_dataset=eval_dataset if training_args.do_eval else None,
++                    eval_examples=eval_examples if training_args.do_eval else None,
++                    tokenizer=tokenizer,
++                    data_collator=data_collator,
++                    post_process_function=post_processing_function,
++                    compute_metrics=compute_metrics,
++                    compression_ctrl=sparsity_ctrl,
++                    kd_teacher_model=kd_teacher_model,
++                    debug_mode=debug_mode,
++                    resume_model=resume_model
++                )
++
++                sparsity_trainer.train()
++                sparsity_trainer.save_model(os.path.join(training_args.output_dir, save_folder))
++                return sparsity_model
++
++            create_importance_mask_fn = generate_importance_mask_weight
++
++        elif 'quantization' in compression_algo_names:
++            train_dataloader = get_train_dataloader_for_init(training_args, train_dataset, data_collator)
++            class SquadInitializingDataloader(PTInitializingDataLoader):
++                def get_inputs(self, dataloader_output):
++                    return (), dataloader_output
++
++            nncf_config.register_extra_structs(
++                [QuantizationRangeInitArgs(SquadInitializingDataloader(train_dataloader))]
++            )
++
++    retval = AutoModelForQuestionAnswering.from_pretrained(
++        model_args.model_name_or_path,
++        from_tf=bool(".ckpt" in model_args.model_name_or_path),
++        config=config,
++        cache_dir=model_args.cache_dir,
++        revision=model_args.model_revision,
++        use_auth_token=True if model_args.use_auth_token else None,
++        nncf_config=nncf_config,
++        nncf_eval=nncf_config is not None and training_args.do_eval and not training_args.do_train,
++        output_dir=training_args.output_dir
++    )
++
++    if nncf_config is None:
++        model = retval
++        compression_ctrl = None
++    else:
++        # if movement sparsity is in config,
++        # then compression_ctrl = [bnas_ctrl, movement_sparsity_ctrl]
++        # model = [bnas_model, movement_sparsity_model]
++        compression_ctrl, model = retval
++        if isinstance(compression_ctrl, ProgressiveShrinkingController):
++            compression_ctrl.multi_elasticity_handler.width_handler.create_importance_mask_fn = create_importance_mask_fn
++        if nncf_config.get("reorg_cache_model", None) and create_importance_mask_fn is not None and isinstance(compression_ctrl, ProgressiveShrinkingController):
++            # reorg_cache_model: importance weight
++            compression_ctrl.multi_elasticity_handler.width_handler.create_importance_mask_fn = partial(create_importance_mask_fn,
++                                                                                                        debug_mode=True,
++                                                                                                        resume_model=nncf_config["reorg_cache_model"])
++
++    if training_args.to_onnx:
++    # Expecting the following forward signature:
++    # (input_ids, attention_mask, token_type_ids, ...)
++        if nncf_config is not None:
++            compression_ctrl.export_model(training_args.to_onnx)
++        else:
++            model.to('cpu')
++            dummy_tensor = torch.ones([1, 384], dtype=torch.long)
++            onnx.export(model, (dummy_tensor, dummy_tensor, dummy_tensor), training_args.to_onnx)
++
+     # Initialize our Trainer
+     trainer = QuestionAnsweringTrainer(
+         model=model,
+@@ -614,8 +805,13 @@ def main():
+         data_collator=data_collator,
+         post_process_function=post_processing_function,
+         compute_metrics=compute_metrics,
++        compression_ctrl=compression_ctrl,
++        kd_teacher_model=kd_teacher_model,
++        sandwich_rule=True,
+     )
+ 
++    # test_train_supernet_interface(trainer)
++
+     # Training
+     if training_args.do_train:
+         checkpoint = None
+@@ -624,6 +820,8 @@ def main():
+         elif last_checkpoint is not None:
+             checkpoint = last_checkpoint
+         train_result = trainer.train(resume_from_checkpoint=checkpoint)
++        if nncf_config is not None:
++            train_result, model, elasticity_ctrl = train_result
+         trainer.save_model()  # Saves the tokenizer too for easy upload
+ 
+         metrics = train_result.metrics
+@@ -636,6 +834,28 @@ def main():
+         trainer.save_metrics("train", metrics)
+         trainer.save_state()
+ 
++        if nncf_config is not None and training_args.do_search:
++            resuming_checkpoint_path = None
++            if resuming_checkpoint_path is None:
++                search_algo = SearchAlgorithm.from_config(model, elasticity_ctrl, nncf_config)
++            else:
++                search_algo = SearchAlgorithm.from_checkpoint(model, elasticity_ctrl, None, resuming_checkpoint_path)
++
++            def validate_model_func(model_, dataset_):
++                #trainer.model will be used to evaluate(trainer.model = model)
++                metrics = trainer.evaluate(eval_dataset=dataset_)
++                return metrics['eval_f1']
++
++            elasticity_ctrl, best_config, performance_metrics = search_algo.run(validate_model_func,
++                                                                                eval_dataset,
++                                                                                training_args.output_dir)
++            logger.info("Best config: {best_config}".format(best_config=best_config))
++            logger.info("Performance metrics: {performance_metrics}".format(performance_metrics=performance_metrics))
++
++            search_algo.visualize_search_progression()
++            search_algo.search_progression_to_csv()
++            search_algo.evaluators_to_csv()
++
+     # Evaluation
+     if training_args.do_eval:
+         logger.info("*** Evaluate ***")
+diff --git a/examples/pytorch/question-answering/trainer_qa.py b/examples/pytorch/question-answering/trainer_qa.py
+index a486405b6..d730a7402 100644
+--- a/examples/pytorch/question-answering/trainer_qa.py
++++ b/examples/pytorch/question-answering/trainer_qa.py
+@@ -17,9 +17,21 @@ A subclass of `Trainer` specific to Question-Answering tasks
+ """
+ import math
+ import time
++from typing import Any, Dict, Union
++
++import torch
++import torch.nn as nn
++import torch.nn.functional as F
+ 
+ from transformers import Trainer, is_torch_tpu_available
+ from transformers.trainer_utils import PredictionOutput, speed_metrics
++from transformers.utils import is_sagemaker_mp_enabled, is_apex_available
++
++if is_apex_available():
++    from apex import amp
++
++if is_sagemaker_mp_enabled():
++    from transformers.trainer_pt_utils import smp_forward_backward
+ 
+ 
+ if is_torch_tpu_available(check_device=False):
+@@ -33,7 +45,7 @@ class QuestionAnsweringTrainer(Trainer):
+         self.eval_examples = eval_examples
+         self.post_process_function = post_process_function
+ 
+-    def evaluate(self, eval_dataset=None, eval_examples=None, ignore_keys=None, metric_key_prefix: str = "eval"):
++    def evaluate(self, eval_dataset=None, eval_examples=None, ignore_keys=None, metric_key_prefix: str = "eval", active_subnet=None):
+         eval_dataset = self.eval_dataset if eval_dataset is None else eval_dataset
+         eval_dataloader = self.get_eval_dataloader(eval_dataset)
+         eval_examples = self.eval_examples if eval_examples is None else eval_examples
+@@ -75,6 +87,10 @@ class QuestionAnsweringTrainer(Trainer):
+             for key in list(metrics.keys()):
+                 if not key.startswith(f"{metric_key_prefix}_"):
+                     metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
++
++                if active_subnet is not None:
++                    metrics.update(active_subnet)
++
+             metrics.update(output.metrics)
+         else:
+             metrics = output.metrics
+@@ -134,3 +150,89 @@ class QuestionAnsweringTrainer(Trainer):
+                 metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
+         metrics.update(output.metrics)
+         return PredictionOutput(predictions=predictions.predictions, label_ids=predictions.label_ids, metrics=metrics)
++
++    def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
++        """
++        Perform a training step on a batch of inputs.
++
++        Subclass and override to inject custom behavior.
++
++        Args:
++            model (`nn.Module`):
++                The model to train.
++            inputs (`Dict[str, Union[torch.Tensor, Any]]`):
++                The inputs and targets of the model.
++
++                The dictionary will be unpacked before being fed to the model. Most models expect the targets under the
++                argument `labels`. Check your model's documentation for all accepted arguments.
++
++        Return:
++            `torch.Tensor`: The tensor with training loss on this batch.
++        """
++        model.train()
++        inputs = self._prepare_inputs(inputs)
++
++        if is_sagemaker_mp_enabled():
++            loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps)
++            return loss_mb.reduce_mean().detach().to(self.args.device)
++
++        with self.compute_loss_context_manager():
++            if self.kd_teacher_model is not None:
++                # currently only add this function for qa task
++                loss, _ = self.compute_kd_loss(model, self.kd_teacher_model, inputs)
++            else:
++                loss = self.compute_loss(model, inputs)
++
++        if self.args.n_gpu > 1:
++            loss = loss.mean()  # mean() to average on multi-gpu parallel training
++
++        if self.args.gradient_accumulation_steps > 1 and not self.deepspeed:
++            # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
++            loss = loss / self.args.gradient_accumulation_steps
++
++        if self.compression_ctrl is not None:
++            compression_loss = self.compression_ctrl.loss()
++            loss += compression_loss
++
++        if self.do_grad_scaling:
++            self.scaler.scale(loss).backward()
++        elif self.use_apex:
++            with amp.scale_loss(loss, self.optimizer) as scaled_loss:
++                scaled_loss.backward()
++        elif self.deepspeed:
++            # loss gets scaled under gradient_accumulation_steps in deepspeed
++            loss = self.deepspeed.backward(loss)
++        else:
++            loss.backward()
++
++        return loss.detach()
++
++    def compute_kd_loss(self, model, teacher_model, inputs, temperature = 2.0, distillation_weight = 0.9,
++                        return_outputs = False, teacher_outputs = None):
++        # Copy from Block Movement Pruning
++
++        def compute_distillation_loss(student_outputs, teacher_outputs):
++            if not teacher_outputs:
++                with torch.no_grad():
++                    teacher_outputs = teacher_model(**inputs)
++
++            distilliation_loss_start = F.kl_div(
++                input=F.log_softmax(student_outputs.start_logits / temperature, dim=-1),
++                target=F.softmax(teacher_outputs.start_logits / temperature, dim=-1),
++                reduction="batchmean",
++            ) * (temperature**2)
++            distilliation_loss_end = F.kl_div(
++                input=F.log_softmax(student_outputs.end_logits / temperature, dim=-1),
++                target=F.softmax(teacher_outputs.end_logits / temperature, dim=-1),
++                reduction="batchmean",
++            ) * (temperature**2)
++            return (distilliation_loss_start + distilliation_loss_end) / 2.0, teacher_outputs
++
++        if self.label_smoother is not None:
++            raise NotImplementedError
++        outputs = model(**inputs)
++
++        distillation_loss, teacher_outputs = compute_distillation_loss(outputs, teacher_outputs)
++        loss = (1 - distillation_weight) * outputs['loss'] + distillation_weight * distillation_loss
++
++        return (loss, teacher_outputs, outputs) if return_outputs else (loss, teacher_outputs)
+diff --git a/examples/pytorch/text-classification/run_glue.py b/examples/pytorch/text-classification/run_glue.py
+index 55fc6bbc3..41f3169a3 100755
+--- a/examples/pytorch/text-classification/run_glue.py
++++ b/examples/pytorch/text-classification/run_glue.py
+@@ -20,13 +20,21 @@ import logging
+ import os
+ import random
+ import sys
++import csv
++from copy import deepcopy
+ from dataclasses import dataclass, field
++from functools import partial
+ from typing import Optional
+ 
+ import datasets
+ import evaluate
+ import numpy as np
+ from datasets import load_dataset
++from nncf import NNCFConfig
++from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import ElasticityDim
++from nncf.experimental.torch.nas.bootstrapNAS.elasticity.multi_elasticity_handler import SubnetConfig
++from nncf.experimental.torch.nas.bootstrapNAS.training.progressive_shrinking_controller import ProgressiveShrinkingController
++from nncf.experimental.torch.nas.bootstrapNAS import SearchAlgorithm
+ 
+ import transformers
+ from transformers import (
+@@ -42,7 +50,7 @@ from transformers import (
+     default_data_collator,
+     set_seed,
+ )
+-from transformers.trainer_utils import get_last_checkpoint
++from transformers.trainer_utils import get_last_checkpoint, IntervalStrategy
+ from transformers.utils import check_min_version, send_example_telemetry
+ from transformers.utils.versions import require_version
+ 
+@@ -203,6 +211,60 @@ class ModelArguments:
+     )
+ 
+ 
++def generate_importance_thre_map_macs_table(compression_ctrl: ProgressiveShrinkingController, sparsity_ctrl, resume_state_dict, output_dir):
++    def get_dict_name(node_name):
++        split_name = node_name.split('/')
++        dict_name = []
++        for name in split_name:
++            if name.endswith(']'):
++                dict_name.append(name[:-1].split('[')[-1])
++        return '.'.join(dict_name)
++
++    def collect_target_thre_subnet_config(csv_file):
++        subnet_config = SubnetConfig()
++        overwrite_group = {}
++        group_idx = 0
++        with open(csv_file) as f:
++            reader = csv.reader(f)
++            for row in reader:
++                if 'query' in row[2] or 'intermediate' in row[2]:
++                    overwrite_group[group_idx] = int(row[6][1:-2]) # prune shape
++                    group_idx += 1
++        subnet_config[ElasticityDim.WIDTH] = overwrite_group
++        return subnet_config
++
++
++    thre_macs_map = {}
++    threshold_list = np.arange(-0.003, -0.001, 0.0001)
++    for thre in threshold_list:
++        # update threshold & weight importance
++        for sparsity_module in sparsity_ctrl._structured_mask_handler.sparsified_module_info_list:
++            sparsity_module.operand._importance_threshold = thre
++            # load from state dict
++            op = sparsity_module.module.pre_ops['0'].op
++            op.training = True
++            op.frozen = False
++            op.weight_importance.data = resume_state_dict[get_dict_name(sparsity_module.module_node_name) + '.pre_ops.0.op.weight_importance']
++            op.weight_ctx.binary_mask = op._calc_training_binary_mask()
++            if hasattr(op, "bias_importance"):
++                op.bias_importance.data = resume_state_dict[get_dict_name(sparsity_module.module_node_name) + '.pre_ops.0.op.bias_importance']
++                op.bias_ctx.binary_mask = op._calc_training_binary_mask(is_bias=True)
++
++        # generate search space
++        sparsity_ctrl._scheduler._params.enable_structured_masking = True
++        sparsity_ctrl._scheduler._controller.reset_independent_structured_mask()
++        sparsity_ctrl._scheduler._controller.resolve_structured_mask()
++        sparsity_ctrl._structured_mask_handler.populate_dependent_structured_mask_to_operand()
++        sparsity_ctrl._structured_mask_handler.report_structured_sparsity(output_dir, f'structured_sparsity_thre{thre}')
++
++        target_subnet_config = collect_target_thre_subnet_config(os.path.join(output_dir, f'structured_sparsity_thre{thre}.csv'))
++        compression_ctrl.multi_elasticity_handler.activate_subnet_for_config(target_subnet_config)
++        flops, _ = compression_ctrl.multi_elasticity_handler.count_flops_and_weights_for_active_subnet()
++        thre_macs_map[thre] = flops / 2e6
++    print(thre_macs_map)
++    import pdb;pdb.set_trace()
++
++
+ def main():
+     # See all possible arguments in src/transformers/training_args.py
+     # or by passing the --help flag to this script.
+@@ -216,6 +278,16 @@ def main():
+     else:
+         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+ 
++    # overwrite total epochs & model_name_or_path
++    if training_args.nncf_config is not None:
++        tmp_nncf_config = NNCFConfig.from_json(training_args.nncf_config)
++        if tmp_nncf_config.get("movement_sparsity_total_epochs", None):
++            training_args.num_train_epochs = tmp_nncf_config["movement_sparsity_total_epochs"]
++        if tmp_nncf_config.get("model_name_or_path", None):
++            model_args.model_name_or_path = tmp_nncf_config["model_name_or_path"]
++        if tmp_nncf_config.get("kd_temperature", None):
++            training_args.kd_temperatue = tmp_nncf_config["kd_temperature"]
++
+     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
+     # information sent is the one passed as arguments along with your Python/PyTorch versions.
+     send_example_telemetry("run_glue", model_args, data_args)
+@@ -404,12 +476,12 @@ def main():
+     # Some models have set the order of the labels to use, so let's make sure we do use it.
+     label_to_id = None
+     if (
+-        model.config.label2id != PretrainedConfig(num_labels=num_labels).label2id
++        config.label2id != PretrainedConfig(num_labels=num_labels).label2id
+         and data_args.task_name is not None
+         and not is_regression
+     ):
+         # Some have all caps in their config, some don't.
+-        label_name_to_id = {k.lower(): v for k, v in model.config.label2id.items()}
++        label_name_to_id = {k.lower(): v for k, v in config.label2id.items()}
+         if sorted(label_name_to_id.keys()) == sorted(label_list):
+             label_to_id = {i: int(label_name_to_id[label_list[i]]) for i in range(num_labels)}
+         else:
+@@ -422,11 +494,11 @@ def main():
+         label_to_id = {v: i for i, v in enumerate(label_list)}
+ 
+     if label_to_id is not None:
+-        model.config.label2id = label_to_id
+-        model.config.id2label = {id: label for label, id in config.label2id.items()}
++        config.label2id = label_to_id
++        config.id2label = {id: label for label, id in config.label2id.items()}
+     elif data_args.task_name is not None and not is_regression:
+-        model.config.label2id = {l: i for i, l in enumerate(label_list)}
+-        model.config.id2label = {id: label for label, id in config.label2id.items()}
++        config.label2id = {l: i for i, l in enumerate(label_list)}
++        config.id2label = {id: label for label, id in config.label2id.items()}
+ 
+     if data_args.max_seq_length > tokenizer.model_max_length:
+         logger.warning(
+@@ -462,6 +534,123 @@ def main():
+             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
+             train_dataset = train_dataset.select(range(max_train_samples))
+ 
++    kd_teacher_model = None
++    if training_args.kd_teacher_model:
++        kd_teacher_model = AutoModelForSequenceClassification.from_pretrained(
++            training_args.kd_teacher_model,
++            from_tf=bool(".ckpt" in training_args.kd_teacher_model),
++            cache_dir=model_args.cache_dir,
++        )
++        kd_teacher_model.eval()
++
++    nncf_config = None
++    create_importance_mask_fn = None
++    if training_args.nncf_config is not None:
++        nncf_config = NNCFConfig.from_json(training_args.nncf_config)
++
++        if nncf_config.get("log_dir") is None:
++            nncf_config["log_dir"] = training_args.output_dir
++
++        if not os.path.exists(training_args.output_dir) and training_args.local_rank in [-1, 0]:
++            os.makedirs(nncf_config["log_dir"])
++
++        if nncf_config.get("kd_teacher_model", None):
++            kd_teacher_model = AutoModelForSequenceClassification.from_pretrained(
++                nncf_config["kd_teacher_model"],
++                from_tf=bool(".ckpt" in nncf_config["kd_teacher_model"]),
++                cache_dir=model_args.cache_dir,
++            )
++            kd_teacher_model.eval()
++
++        if nncf_config.get("kd_mode", None):
++            training_args.kd_mode = nncf_config["kd_mode"]
++
++        # split nncf_config --> bnas + movement sparsity
++        compression_algo_names = [algo['algorithm'] for algo in nncf_config.get('compression', [])]
++        if 'movement_sparsity' in compression_algo_names:
++            sparsity_nncf_config = deepcopy(nncf_config)
++            if 'bootstrapNAS' in sparsity_nncf_config:
++                del sparsity_nncf_config['bootstrapNAS']
++
++            def generate_importance_mask_weight(model_state_dict, debug_mode=False, save_folder='movement_sparsity',
++                                                resume_model=None, bnas_training_ctrl=None):
++                # create movement sparsity ctrl
++                sparsity_ctrl, sparsity_model = AutoModelForSequenceClassification.from_pretrained(
++                    model_args.model_name_or_path,
++                    from_tf=bool(".ckpt" in model_args.model_name_or_path),
++                    config=config,
++                    cache_dir=model_args.cache_dir,
++                    revision=model_args.model_revision,
++                    use_auth_token=True if model_args.use_auth_token else None,
++                    nncf_config=sparsity_nncf_config,
++                    nncf_eval=nncf_config is not None and training_args.do_eval and not training_args.do_train,
++                )
++                sparsity_model.load_state_dict(model_state_dict, strict=False) # use current bnas model state dict
++
++                sparsity_trainer = Trainer(
++                    model=sparsity_model,
++                    args=training_args,
++                    train_dataset=train_dataset if training_args.do_train else None,
++                    eval_dataset=eval_dataset if training_args.do_eval else None,
++                    tokenizer=tokenizer,
++                    data_collator=data_collator,
++                    compute_metrics=compute_metrics,
++                    compression_ctrl=sparsity_ctrl,
++                    kd_teacher_model=kd_teacher_model,
++                    debug_mode=debug_mode,
++                    resume_model=resume_model
++                )
++
++                # update threshold & generate search space
++                if debug_mode:
++                    import torch
++                    resume_state_dict = torch.load(resume_model, map_location=sparsity_model.device)
++                    # generate_importance_thre_map_macs_table(bnas_training_ctrl, sparsity_ctrl, resume_state_dict, training_args.output_dir)
++
++                sparsity_trainer.train()
++                sparsity_trainer.save_model(os.path.join(training_args.output_dir, save_folder))
++                return sparsity_model
++
++            create_importance_mask_fn = generate_importance_mask_weight
++
++
++    retval = AutoModelForSequenceClassification.from_pretrained(
++        model_args.model_name_or_path,
++        from_tf=bool(".ckpt" in model_args.model_name_or_path),
++        config=config,
++        cache_dir=model_args.cache_dir,
++        revision=model_args.model_revision,
++        use_auth_token=True if model_args.use_auth_token else None,
++        nncf_config=nncf_config,
++        nncf_eval=nncf_config is not None and training_args.do_eval and not training_args.do_train
++    )
++
++    if nncf_config is None:
++        model = retval
++        compression_ctrl = None
++    else:
++        compression_ctrl, model = retval
++        if isinstance(compression_ctrl, ProgressiveShrinkingController):
++            compression_ctrl.multi_elasticity_handler.width_handler.create_importance_mask_fn = create_importance_mask_fn
++        if nncf_config.get("reorg_cache_model", None) and create_importance_mask_fn is not None:
++            # reorg_cache_model: importance weight
++            compression_ctrl.multi_elasticity_handler.width_handler.create_importance_mask_fn = partial(create_importance_mask_fn,
++                                                                                                        debug_mode=True,
++                                                                                                        resume_model=nncf_config["reorg_cache_model"])
++
++    if training_args.to_onnx:
++    # Expecting the following forward signature:
++    # (input_ids, attention_mask, token_type_ids, ...)
++        if nncf_config is not None:
++            compression_ctrl.export_model(training_args.to_onnx)
++        else:
++            model.to('cpu')
++            import torch
++            from torch import onnx
++            dummy_tensor = torch.ones([1, 128], dtype=torch.long)
++            onnx.export(model, (dummy_tensor, dummy_tensor, dummy_tensor),
++                        training_args.to_onnx, opset_version=10)
++
+     if training_args.do_eval:
+         if "validation" not in raw_datasets and "validation_matched" not in raw_datasets:
+             raise ValueError("--do_eval requires a validation dataset")
+@@ -519,8 +708,16 @@ def main():
+         compute_metrics=compute_metrics,
+         tokenizer=tokenizer,
+         data_collator=data_collator,
++        compression_ctrl=compression_ctrl,
++        kd_teacher_model=kd_teacher_model,
++        sandwich_rule=True,
+     )
+ 
++
++    if nncf_config is not None:
++        if not (training_args.local_rank == -1 or training_args.no_cuda):
++            compression_ctrl.distributed()
++
+     # Training
+     if training_args.do_train:
+         checkpoint = None
+@@ -529,18 +726,45 @@ def main():
+         elif last_checkpoint is not None:
+             checkpoint = last_checkpoint
+         train_result = trainer.train(resume_from_checkpoint=checkpoint)
++        if nncf_config is not None and isinstance(compression_ctrl, ProgressiveShrinkingController):
++            train_result, model, elasticity_ctrl = train_result
++
+         metrics = train_result.metrics
+         max_train_samples = (
+             data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
+         )
+         metrics["train_samples"] = min(max_train_samples, len(train_dataset))
+ 
+-        trainer.save_model()  # Saves the tokenizer too for easy upload
+-
++        trainer.save_model() # Saves the tokenizer too for easy upload
+         trainer.log_metrics("train", metrics)
+         trainer.save_metrics("train", metrics)
+         trainer.save_state()
+ 
++        if nncf_config is not None and isinstance(compression_ctrl, ProgressiveShrinkingController) and training_args.do_search:
++            resuming_checkpoint_path = None
++            if resuming_checkpoint_path is None:
++                search_algo = SearchAlgorithm.from_config(model, elasticity_ctrl, nncf_config)
++            else:
++                search_algo = SearchAlgorithm.from_checkpoint(model, elasticity_ctrl, None, resuming_checkpoint_path)
++
++            def validate_model_func(model_, dataset_, eval_metric_name = 'eval_accuracy'):
++                #trainer.model will be used to evaluate(trainer.model = model)
++                metrics = trainer.evaluate(eval_dataset=dataset_)
++                return metrics[eval_metric_name] * 100
++
++            eval_metric_name = nncf_config.get("bootstrapNAS", {}).get("search", {}).get("eval_metric_name", "eval_accuracy")
++
++            elasticity_ctrl, best_config, performance_metrics = search_algo.run(partial(validate_model_func, eval_metric_name=eval_metric_name),
++                                                                                eval_dataset,
++                                                                                training_args.output_dir)
++            logger.info("Best config: {best_config}".format(best_config=best_config))
++            logger.info("Performance metrics: {performance_metrics}".format(performance_metrics=performance_metrics))
++
++            search_algo.visualize_search_progression()
++            search_algo.search_progression_to_csv()
++            search_algo.evaluators_to_csv()
++
++
+     # Evaluation
+     if training_args.do_eval:
+         logger.info("*** Evaluate ***")
+diff --git a/src/transformers/modeling_utils.py b/src/transformers/modeling_utils.py
+index bf06d9c40..13c0ab81b 100644
+--- a/src/transformers/modeling_utils.py
++++ b/src/transformers/modeling_utils.py
+@@ -23,6 +23,7 @@ import shutil
+ import tempfile
+ import warnings
+ from contextlib import contextmanager
++from copy import deepcopy
+ from dataclasses import dataclass
+ from functools import partial
+ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+@@ -31,6 +32,10 @@ import torch
+ from packaging import version
+ from torch import Tensor, nn
+ from torch.nn import CrossEntropyLoss
++from nncf.torch.model_creation import create_nncf_network
++from nncf.experimental.torch.nas.bootstrapNAS.training.model_creator_helpers import \
++    create_compressed_model_from_algo_names
++from nncf.torch.knowledge_distillation.knowledge_distillation_loss import KnowledgeDistillationLoss
+ 
+ from .activations import get_activation
+ from .configuration_utils import PretrainedConfig
+@@ -1642,6 +1647,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+         max_shard_size: Union[int, str] = "10GB",
+         safe_serialization: bool = False,
+         variant: Optional[str] = None,
++        nncf_compression_state: Dict = None,
+         **kwargs,
+     ):
+         """
+@@ -2154,6 +2160,10 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+         commit_hash = kwargs.pop("_commit_hash", None)
+         variant = kwargs.pop("variant", None)
+         use_safetensors = kwargs.pop("use_safetensors", None if is_safetensors_available() else False)
++        nncf_config = kwargs.pop("nncf_config", None)
++        nncf_eval = kwargs.pop("nncf_eval", False)
++        kd_teacher_model = kwargs.pop("kd_teacher_model", None)
++        output_dir = kwargs.pop("output_dir", None)
+ 
+         if is_bitsandbytes_available():
+             is_8bit_serializable = version.parse(importlib_metadata.version("bitsandbytes")) > version.parse("0.37.2")
+@@ -2763,6 +2773,12 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+                 )
+                 raise
+         elif from_pt:
++            if nncf_config is not None and nncf_eval:
++                nncf_network = create_nncf_network(model, nncf_config)
++                algo_name = nncf_config.get('bootstrapNAS', {}).get('training', {}).get('algorithm', 'progressive_shrinking')
++                compression_ctrl, model = create_compressed_model_from_algo_names(nncf_network, nncf_config, algo_names=[algo_name])
++                return compression_ctrl, model
++
+             # restore default dtype
+             if dtype_orig is not None:
+                 torch.set_default_dtype(dtype_orig)
+@@ -2800,6 +2816,37 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+         # Set model in evaluation mode to deactivate DropOut modules by default
+         model.eval()
+ 
++        if nncf_config is not None:
++            # bnas ctrl
++            algo_name = nncf_config.get('bootstrapNAS', {}).get('training', {}).get('algorithm', None)
++            if algo_name:
++                nncf_network = create_nncf_network(model, nncf_config)
++                compression_ctrl, model = create_compressed_model_from_algo_names(nncf_network, nncf_config, algo_names=[algo_name])
++                return compression_ctrl, model
++
++            ## sparsity ctrl: add reorg mask -> movement sparsity / quantization
++            compression_algo_names = [algo['algorithm'] for algo in nncf_config.get('compression', [])]
++            assert len(compression_algo_names) == 1
++            from nncf.torch import create_compressed_model
++            if 'quantization' in compression_algo_names:
++                # the part to compare with JPQD --> get clean subnet and quantize. Not related to AAAI
++                from nncf.experimental.torch.nas.bootstrapNAS.search.supernet import TrainedSuperNet
++                nncf_config.device = model.device
++                supernet_weights_path = os.path.join(os.path.dirname(output_dir), 'pytorch_model.bin')
++                supernet_elasticity_path = os.path.join(os.path.dirname(output_dir), 'elasticity_state.pt')
++                best_subnet_config = torch.load(os.path.join(os.path.dirname(output_dir), 'subnetwork_best.pth'))['subnet_config']
++                train_supernet = TrainedSuperNet.from_checkpoint(
++                    model, nncf_config, supernet_elasticity_path, supernet_weights_path
++                )
++                train_supernet.activate_config(best_subnet_config)
++                model = train_supernet.get_clean_subnet()
++
++            print(f'{compression_algo_names}')
++            compression_ctrl, model = create_compressed_model(model, nncf_config)
++
++            return compression_ctrl, model
++
++
+         # If it is a model with generation capabilities, attempt to load the generation config
+         if model.can_generate():
+             try:
+diff --git a/src/transformers/models/bert/modeling_bert.py b/src/transformers/models/bert/modeling_bert.py
+index ee7dcd5e4..4b201335c 100755
+--- a/src/transformers/models/bert/modeling_bert.py
++++ b/src/transformers/models/bert/modeling_bert.py
+@@ -267,7 +267,8 @@ class BertSelfAttention(nn.Module):
+         self.is_decoder = config.is_decoder
+ 
+     def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
+-        new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
++        # new_x_shape = x.size()[:-1] + (self.num_attention_heads, -1) #self.attention_head_size)
++        new_x_shape = x.size()[:-1] + (-1, self.attention_head_size) # change head num instead of head size
+         x = x.view(new_x_shape)
+         return x.permute(0, 2, 1, 3)
+ 
+@@ -363,7 +364,7 @@ class BertSelfAttention(nn.Module):
+         context_layer = torch.matmul(attention_probs, value_layer)
+ 
+         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+-        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
++        new_context_layer_shape = context_layer.size()[:-2] + (-1, ) #(self.all_head_size,)
+         context_layer = context_layer.view(new_context_layer_shape)
+ 
+         outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
+diff --git a/src/transformers/models/vit/modeling_vit.py b/src/transformers/models/vit/modeling_vit.py
+index 474b92f72..18486e32f 100644
+--- a/src/transformers/models/vit/modeling_vit.py
++++ b/src/transformers/models/vit/modeling_vit.py
+@@ -202,7 +202,7 @@ class ViTSelfAttention(nn.Module):
+         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
+ 
+     def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
+-        new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
++        new_x_shape = x.size()[:-1] + (-1, self.attention_head_size) #(self.num_attention_heads, self.attention_head_size)
+         x = x.view(new_x_shape)
+         return x.permute(0, 2, 1, 3)
+ 
+@@ -234,7 +234,7 @@ class ViTSelfAttention(nn.Module):
+         context_layer = torch.matmul(attention_probs, value_layer)
+ 
+         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+-        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
++        new_context_layer_shape = context_layer.size()[:-2] + (-1,) #(self.all_head_size,)
+         context_layer = context_layer.view(new_context_layer_shape)
+ 
+         outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
+diff --git a/src/transformers/trainer.py b/src/transformers/trainer.py
+index f7fb3558d..de00b137d 100755
+--- a/src/transformers/trainer.py
++++ b/src/transformers/trainer.py
+@@ -32,6 +32,9 @@ from collections.abc import Mapping
+ from pathlib import Path
+ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
+ 
++import torch.nn.functional as F
++import torch.nn as nn
++from nncf.torch.nncf_network import NNCFNetwork
+ from tqdm.auto import tqdm
+ 
+ 
+@@ -57,6 +60,14 @@ from .integrations import (
+ import numpy as np
+ import torch
+ import torch.distributed as dist
++from nncf.api.compression import CompressionStage
++from nncf.experimental.torch.nas.bootstrapNAS.training.progressive_shrinking_controller import ProgressiveShrinkingController
++from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import ElasticityDim
++from nncf.experimental.torch.nas.bootstrapNAS.elasticity.multi_elasticity_handler import SubnetConfig
++from nncf.experimental.torch.sparsity.movement.algo import MovementSparsityController
++from nncf.torch.compression_method_api import PTCompressionAlgorithmController
++from nncf.common.utils.tensorboard import prepare_for_tensorboard
++from nncf.torch.checkpoint_loading import load_state
+ from huggingface_hub import Repository, create_repo
+ from packaging import version
+ from torch import nn
+@@ -70,7 +81,7 @@ from .debug_utils import DebugOption, DebugUnderflowOverflow
+ from .deepspeed import deepspeed_init, is_deepspeed_zero3_enabled
+ from .dependency_versions_check import dep_version_check
+ from .modelcard import TrainingSummary
+-from .modeling_utils import PreTrainedModel, load_sharded_checkpoint, unwrap_model
++from .modeling_utils import PreTrainedModel, load_sharded_checkpoint, no_init_weights, unwrap_model
+ from .models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING_NAMES, MODEL_MAPPING_NAMES
+ from .optimization import Adafactor, get_scheduler
+ from .pytorch_utils import ALL_LAYERNORM_LAYERS, is_torch_greater_or_equal_than_1_10, is_torch_less_than_1_11
+@@ -135,6 +146,7 @@ from .trainer_utils import (
+ from .training_args import OptimizerNames, ParallelMode, TrainingArguments
+ from .utils import (
+     CONFIG_NAME,
++    NNCF_CONFIG_NAME,
+     SAFE_WEIGHTS_INDEX_NAME,
+     SAFE_WEIGHTS_NAME,
+     WEIGHTS_INDEX_NAME,
+@@ -153,6 +165,7 @@ from .utils import (
+     is_torch_compile_available,
+     is_torch_neuroncore_available,
+     is_torch_tpu_available,
++    replace_return_docstrings,
+     logging,
+     strtobool,
+ )
+@@ -227,6 +240,58 @@ SCHEDULER_NAME = "scheduler.pt"
+ SCALER_NAME = "scaler.pt"
+ 
+ 
++def get_train_dataloader_for_init(args, train_dataset, data_collator=None):
++    from torch.utils.data import RandomSampler
++    train_sampler = (
++        RandomSampler(train_dataset)
++    )
++
++    if data_collator is None:
++        from transformers.data.data_collator import default_data_collator
++        data_collator = default_data_collator
++
++    from torch.utils.data import DataLoader
++    data_loader = DataLoader(
++        train_dataset,
++        batch_size=args.train_batch_size,
++        sampler=train_sampler,
++        collate_fn=data_collator,
++        drop_last=args.dataloader_drop_last,
++    )
++    return data_loader
++
++
++def convert_str_config(str_config):
++    # an ugly verison - assume elastic width in str_config
++    subnet_config = SubnetConfig()
++
++    assert "ElasticityDim.WIDTH" in str_config
++
++    if "ElasticityDim.KERNEL" in str_config:
++        raise NotImplementedError
++    if "ElasticityDim.DEPTH" in str_config:
++        str_width_config, str_depth_config = str_config.split("}), (<ElasticityDim.DEPTH: 'depth'>, ")
++    else:
++        str_width_config = str_config.split("})")[0]
++        str_depth_config = None
++
++    str_width_config = str_width_config.split("OrderedDict([(<ElasticityDim.WIDTH: 'width'>, {")[-1]
++    width_config = {}
++    for block in str_width_config.split(", "):
++        block_id, block_w = block.split(": ")
++        width_config[int(block_id)] = int(block_w)
++    subnet_config[ElasticityDim.WIDTH] = width_config
++
++    if str_depth_config is not None:
++        str_depth_config = str_depth_config.split(")])")[0]
++        depth_config = []
++        if str_depth_config != "[]":
++            depth_config = [int(block_id) for block_id in str_depth_config[1:-1].split(", ")]
++        subnet_config[ElasticityDim.DEPTH] = depth_config
++
++    return subnet_config
++
++
+ class Trainer:
+     """
+     Trainer is a simple but feature-complete training and eval loop for PyTorch, optimized for 🤗 Transformers.
+@@ -325,17 +390,30 @@ class Trainer:
+         callbacks: Optional[List[TrainerCallback]] = None,
+         optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = (None, None),
+         preprocess_logits_for_metrics: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
++        compression_ctrl: PTCompressionAlgorithmController = None,
++        kd_teacher_model: nn.Module = None,
++        debug_mode: bool = False,
++        resume_model: str = None,
++        sandwich_rule: bool = False,
++        finetune_config: str = None
+     ):
+         if args is None:
+             output_dir = "tmp_trainer"
+             logger.info(f"No `TrainingArguments` passed, using `output_dir={output_dir}`.")
+             args = TrainingArguments(output_dir=output_dir)
+         self.args = args
++        self.compression_ctrl = compression_ctrl
+         # Seed must be set before instantiating the model when using model
+         enable_full_determinism(self.args.seed) if self.args.full_determinism else set_seed(self.args.seed)
+         self.hp_name = None
+         self.deepspeed = None
+         self.is_in_train = False
++        self.debug_mode = debug_mode
++        self.resume_model = resume_model
++        self.sandwich_rule = sandwich_rule
++        self.mse_loss = nn.MSELoss()
++        # finetune config is not used for the final version of AAAI
++        self.finetune_config = None if finetune_config is None else convert_str_config(finetune_config)
+ 
+         # memory metrics - must set up as early as possible
+         self._memory_tracker = TrainerMemoryTracker(self.args.skip_memory_metrics)
+@@ -497,6 +575,8 @@ class Trainer:
+ 
+         if self.place_model_on_device and not getattr(model, "is_loaded_in_8bit", False):
+             self._move_model_to_device(model, args.device)
++            if kd_teacher_model is not None:
++                self._move_model_to_device(kd_teacher_model, args.device)
+ 
+         # Force n_gpu to 1 to avoid DataParallel as MP will manage the GPUs
+         if self.is_model_parallel:
+@@ -505,6 +585,7 @@ class Trainer:
+         # later use `self.model is self.model_wrapped` to check if it's wrapped or not
+         self.model_wrapped = model
+         self.model = model
++        self.kd_teacher_model = kd_teacher_model
+ 
+         self.compute_metrics = compute_metrics
+         self.preprocess_logits_for_metrics = preprocess_logits_for_metrics
+@@ -746,7 +827,10 @@ class Trainer:
+     def _set_signature_columns_if_needed(self):
+         if self._signature_columns is None:
+             # Inspect model forward signature to keep only the arguments it accepts.
+-            signature = inspect.signature(self.model.forward)
++            if isinstance(self.model, NNCFNetwork):
++                signature = inspect.signature(self.model.get_nncf_wrapped_model().forward)
++            else:
++                signature = inspect.signature(self.model.forward)
+             self._signature_columns = list(signature.parameters.keys())
+             # Labels may be named label or label_ids, the default data collator handles that.
+             self._signature_columns += list(set(["label", "label_ids"] + self.label_names))
+@@ -1308,6 +1392,9 @@ class Trainer:
+                 self.state.save_to_json(os.path.join(output_dir, TRAINER_STATE_NAME))
+                 torch.save(self.optimizer.state_dict(), os.path.join(output_dir, OPTIMIZER_NAME))
+                 torch.save(self.lr_scheduler.state_dict(), os.path.join(output_dir, SCHEDULER_NAME))
++                if isinstance(self.compression_ctrl, ProgressiveShrinkingController):
++                    elasticity_state = self.compression_ctrl.elasticity_controller.get_compression_state()
++                    torch.save(elasticity_state, os.path.join(output_dir, "elasticity_state.pt"))
+ 
+     def call_model_init(self, trial=None):
+         model_init_argcount = number_of_arguments(self.model_init)
+@@ -1567,6 +1654,8 @@ class Trainer:
+                 kwargs["bucket_cap_mb"] = self.args.ddp_bucket_cap_mb
+             if is_torch_neuroncore_available():
+                 return model
++            if self.compression_ctrl is not None:
++                self.compression_ctrl.distributed()
+             if any(p.requires_grad for p in model.parameters()):
+                 model = nn.parallel.DistributedDataParallel(
+                     model,
+@@ -1682,7 +1771,28 @@ class Trainer:
+         total_train_batch_size = args.train_batch_size * args.gradient_accumulation_steps * args.world_size
+ 
+         len_dataloader = None
+-        if has_length(train_dataloader):
++        if isinstance(self.compression_ctrl, ProgressiveShrinkingController):
++            #save nncf_config
++            nncf_config_save_path = os.path.join(args.output_dir, NNCF_CONFIG_NAME)
++            shutil.copyfile(args.nncf_config, nncf_config_save_path)
++
++            assert has_length(train_dataloader)
++            len_dataloader = len(train_dataloader)
++
++            num_update_steps_per_epoch = len_dataloader // args.gradient_accumulation_steps
++            num_update_steps_per_epoch = max(num_update_steps_per_epoch, 1)
++            num_examples = self.num_examples(train_dataloader)
++
++            self.create_optimizer()
++            #use our own lr scheduler
++            self.compression_ctrl.set_training_lr_scheduler_args(self.optimizer, num_update_steps_per_epoch)
++            self.lr_scheduler = self.compression_ctrl.scheduler._lr_scheduler
++
++            num_train_epochs = self.compression_ctrl.get_total_num_epochs()
++            max_steps = math.ceil(num_train_epochs * num_update_steps_per_epoch)
++            num_train_samples = self.num_examples(train_dataloader) * num_train_epochs
++
++        elif has_length(train_dataloader):
+             len_dataloader = len(train_dataloader)
+             num_update_steps_per_epoch = len_dataloader // args.gradient_accumulation_steps
+             num_update_steps_per_epoch = max(num_update_steps_per_epoch, 1)
+@@ -1870,8 +1980,68 @@ class Trainer:
+                     # AT THE VERY END!
+                     _ = list(train_dataloader.sampler)
+ 
++        if self.compression_ctrl is not None:
++            self.best_compression_stage = CompressionStage.UNCOMPRESSED
++
++        if self.debug_mode:
++            # avoid the training loop & make sure the state of compression ctrl is correct
++            for _ in range(2):
++                self.compression_ctrl.scheduler.epoch_step()
++                for _ in range(5):
++                    self.compression_ctrl.scheduler.step()
++            try: # GLUE
++                load_state(self.model, torch.load(self.resume_model, map_location='cpu'),
++                        is_resume=True, keys_to_ignore=["classifier.bias", "classifier.weight"])
++            except: # QA
++                load_state(self.model, torch.load(self.resume_model, map_location='cpu'),
++                        is_resume=False, keys_to_ignore=["classifier.bias", "classifier.weight", "bert.pooler.dense.bias", "bert.pooler.dense.weight"])
++            if isinstance(self.compression_ctrl, MovementSparsityController):
++                print(self.compression_ctrl._scheduler._is_controller_frozen)
++            if isinstance(self.compression_ctrl, ProgressiveShrinkingController):
++                return None, model, self.compression_ctrl.elasticity_controller
++            return None
++
+         total_batched_samples = 0
+         for epoch in range(epochs_trained, num_train_epochs):
++            if self.compression_ctrl is not None:
++                if isinstance(self.compression_ctrl, MovementSparsityController) and self.compression_ctrl._scheduler._is_controller_frozen:
++                    logger.info("only to get weight importance mask, stop training")
++                    break
++                self.compression_ctrl.scheduler.epoch_step()
++                self.compression_stage = self.compression_ctrl.compression_stage()
++                # logger.info(self.compression_ctrl.statistics().to_str())
++
++                if isinstance(self.compression_ctrl, ProgressiveShrinkingController):
++
++                    def get_search_space(compression_ctrl):
++                        m_handler = compression_ctrl.multi_elasticity_handler
++                        active_handlers = {
++                            dim: m_handler._handlers[dim] for dim in m_handler._handlers if m_handler._is_handler_enabled_map[dim]
++                        }
++                        space = {}
++                        for handler_id, handler in active_handlers.items():
++                            space[handler_id.value] = handler.get_search_space()
++                        return space
++
++                    self.compression_ctrl.multi_elasticity_handler.activate_minimum_subnet()
++                    flops, weight_params = self.compression_ctrl.multi_elasticity_handler.count_flops_and_weights_for_active_subnet()
++                    logger.info(f"min subnet flops: {flops / 2e6} weight params: {weight_params/1e6}")
++
++                    self.compression_ctrl.multi_elasticity_handler.activate_maximum_subnet()
++                    flops, weight_params = self.compression_ctrl.multi_elasticity_handler.count_flops_and_weights_for_active_subnet()
++                    logger.info(f"max subnet flops: {flops / 2e6} weight params: {weight_params/1e6}")
++                    logger.info(get_search_space(self.compression_ctrl))
++
++                    if self.finetune_config:
++                        if epoch == 0:
++                            logger.info("finetune 1 model")
++                            if not self.args.output_dir.endswith('_proxy'):
++                                print(f'load state from {self.resume_model}')
++                                load_state(self.model, torch.load(self.resume_model, map_location='cpu'), is_resume=True)
++                        self.compression_ctrl.multi_elasticity_handler.activate_subnet_for_config(self.finetune_config)
++                        flops, weight_params = self.compression_ctrl.multi_elasticity_handler.count_flops_and_weights_for_active_subnet()
++                        logger.info(f"current subnet flops: {flops / 2e6} weight params: {weight_params/1e6}")
++
+             if isinstance(train_dataloader, DataLoader) and isinstance(train_dataloader.sampler, DistributedSampler):
+                 train_dataloader.sampler.set_epoch(epoch)
+             elif hasattr(train_dataloader, "dataset") and isinstance(train_dataloader.dataset, IterableDatasetShard):
+@@ -1907,6 +2077,9 @@ class Trainer:
+ 
+             step = -1
+             for step, inputs in enumerate(epoch_iterator):
++                if isinstance(self.compression_ctrl, MovementSparsityController) and self.compression_ctrl._scheduler._is_controller_frozen:
++                    # when the importance mask is freezed by the movement_sparsity_ctrl, return
++                    break
+                 total_batched_samples += 1
+                 if rng_to_sync:
+                     self._load_rng_state(resume_from_checkpoint)
+@@ -1926,6 +2099,12 @@ class Trainer:
+ 
+                 if step % args.gradient_accumulation_steps == 0:
+                     self.control = self.callback_handler.on_step_begin(args, self.state, self.control)
++                    if self.compression_ctrl is not None:
++                        if isinstance(self.compression_ctrl, ProgressiveShrinkingController):
++                            if not self.sandwich_rule and self.finetune_config is None:
++                                self.compression_ctrl.step()
++                        else:
++                            self.compression_ctrl.scheduler.step()
+ 
+                 if (
+                     (total_batched_samples % args.gradient_accumulation_steps != 0)
+@@ -1935,9 +2114,15 @@ class Trainer:
+                 ):
+                     # Avoid unnecessary DDP synchronization since there will be no backward pass on this example.
+                     with model.no_sync():
+-                        tr_loss_step = self.training_step(model, inputs)
++                        if self.finetune_config or not self.sandwich_rule or (not isinstance(self.compression_ctrl, ProgressiveShrinkingController)):
++                            tr_loss_step = self.training_step(model, inputs)
++                        else:
++                            tr_loss_step = self.training_step_sandwich_rule(model, inputs, sandwich_num=3)
+                 else:
+-                    tr_loss_step = self.training_step(model, inputs)
++                    if self.finetune_config or not self.sandwich_rule or (not isinstance(self.compression_ctrl, ProgressiveShrinkingController)):
++                        tr_loss_step = self.training_step(model, inputs)
++                    else:
++                        tr_loss_step = self.training_step_sandwich_rule(model, inputs, sandwich_num=3)
+ 
+                 if (
+                     args.logging_nan_inf_filter
+@@ -2011,9 +2196,10 @@ class Trainer:
+                         if not isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                             self.lr_scheduler.step()
+ 
+-                    model.zero_grad()
++                    model.zero_grad(set_to_none=True)
+                     self.state.global_step += 1
+                     self.state.epoch = epoch + (step + 1 + steps_skipped) / steps_in_epoch
++                    self.state.curr_loss = tr_loss_step.cpu().detach().item()
+                     self.control = self.callback_handler.on_step_end(args, self.state, self.control)
+ 
+                     self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval)
+@@ -2032,6 +2218,8 @@ class Trainer:
+ 
+             self.control = self.callback_handler.on_epoch_end(args, self.state, self.control)
+             self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval)
++            if self.compression_ctrl is not None:
++                self.best_compression_stage = max(self.compression_stage, self.best_compression_stage)
+ 
+             if DebugOption.TPU_METRICS_DEBUG in self.args.debug:
+                 if is_torch_tpu_available():
+@@ -2088,6 +2276,9 @@ class Trainer:
+ 
+         self.control = self.callback_handler.on_train_end(args, self.state, self.control)
+ 
++        if isinstance(self.compression_ctrl, ProgressiveShrinkingController):
++            return TrainOutput(self.state.global_step, train_loss, metrics), model, self.compression_ctrl.elasticity_controller
++
+         return TrainOutput(self.state.global_step, train_loss, metrics)
+ 
+     def _get_output_dir(self, trial):
+@@ -2279,6 +2470,13 @@ class Trainer:
+             logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+             logs["learning_rate"] = self._get_learning_rate()
+ 
++            if self.compression_ctrl is not None:
++                logs["compression_loss"] = self.compression_ctrl.loss().item()
++                compression_stats = self.compression_ctrl.statistics()
++                for key, value in prepare_for_tensorboard(compression_stats).items():
++                    logs["compression/statistics/{0}".format(key)] = value
++                print(compression_stats.to_str())
++
+             self._total_loss_scalar += tr_loss_scalar
+             self._globalstep_last_logged = self.state.global_step
+             self.store_flos()
+@@ -2286,19 +2484,58 @@ class Trainer:
+             self.log(logs)
+ 
+         metrics = None
++        metrics_minsubnet = None
++        metrics_supernet = None
+         if self.control.should_evaluate:
+-            if isinstance(self.eval_dataset, dict):
+-                metrics = {}
+-                for eval_dataset_name, eval_dataset in self.eval_dataset.items():
+-                    dataset_metrics = self.evaluate(
+-                        eval_dataset=eval_dataset,
+-                        ignore_keys=ignore_keys_for_eval,
+-                        metric_key_prefix=f"eval_{eval_dataset_name}",
+-                    )
+-                    metrics.update(dataset_metrics)
++            if isinstance(self.compression_ctrl, ProgressiveShrinkingController) and self.finetune_config is None:
++                if isinstance(self.eval_dataset, dict):
++                    metrics = {}
++                    for eval_dataset_name, eval_dataset in self.eval_dataset.items():
++                        self.compression_ctrl.multi_elasticity_handler.activate_minimum_subnet()
++                        active_subnet = self.compression_ctrl.multi_elasticity_handler.get_active_config()
++                        logger.info(f'Minimum SubNet={active_subnet}')
++                        dataset_metrics_minsubnet = self.evaluate(
++                            eval_dataset=eval_dataset,
++                            ignore_keys=ignore_keys_for_eval,
++                            metric_key_prefix=f"eval_{eval_dataset_name}_minsubnet",
++                            active_subnet={'Minimum SubNet': str(active_subnet)})
++                        metrics.update(dataset_metrics_minsubnet)
++
++                        self.compression_ctrl.multi_elasticity_handler.activate_maximum_subnet()
++                        active_subnet = self.compression_ctrl.multi_elasticity_handler.get_active_config()
++                        logger.info(f'SuperNet={active_subnet}')
++                        dataset_metrics_supernet = self.evaluate(
++                            eval_dataset=eval_dataset,
++                            ignore_keys=ignore_keys_for_eval,
++                            metric_key_prefix=f"eval_{eval_dataset_name}_supernet",
++                            active_subnet={'SuperNet': str(active_subnet)})
++                        metrics.update(dataset_metrics_supernet)
++                    self._report_to_hp_search(trial, epoch, metrics)
++                else:
++                    self.compression_ctrl.multi_elasticity_handler.activate_minimum_subnet()
++                    active_subnet = self.compression_ctrl.multi_elasticity_handler.get_active_config()
++                    logger.info(f'Minimum SubNet={active_subnet}')
++                    metrics_minsubnet = self.evaluate(ignore_keys=ignore_keys_for_eval, active_subnet={'Minimum SubNet': str(active_subnet)})
++                    self._report_to_hp_search(trial, epoch, metrics_minsubnet)
++
++                    self.compression_ctrl.multi_elasticity_handler.activate_maximum_subnet()
++                    active_subnet = self.compression_ctrl.multi_elasticity_handler.get_active_config()
++                    logger.info(f'SuperNet={active_subnet}')
++                    metrics_supernet = self.evaluate(ignore_keys=ignore_keys_for_eval, active_subnet={'SuperNet': str(active_subnet)})
++                    self._report_to_hp_search(trial, epoch, metrics_supernet)
+             else:
+-                metrics = self.evaluate(ignore_keys=ignore_keys_for_eval)
+-            self._report_to_hp_search(trial, self.state.global_step, metrics)
++                if isinstance(self.eval_dataset, dict):
++                    metrics = {}
++                    for eval_dataset_name, eval_dataset in self.eval_dataset.items():
++                        dataset_metrics = self.evaluate(
++                            eval_dataset=eval_dataset,
++                            ignore_keys=ignore_keys_for_eval,
++                            metric_key_prefix=f"eval_{eval_dataset_name}",
++                        )
++                        metrics.update(dataset_metrics)
++                else:
++                    metrics = self.evaluate(ignore_keys=ignore_keys_for_eval)
++                self._report_to_hp_search(trial, self.state.global_step, metrics)
+ 
+             # Run delayed LR scheduler now that metrics are populated
+             if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+@@ -2349,7 +2586,13 @@ class Trainer:
+         if is_torch_tpu_available():
+             xm.set_rng_state(checkpoint_rng_state["xla"])
+ 
+-    def _save_checkpoint(self, model, trial, metrics=None):
++    def is_boostrapNAS_best_accuracy(self, metric_value, best_metric_value, operator,
++                                         compression_stage, best_compression_stage):
++        is_best_by_accuracy = operator(metric_value, best_metric_value) and compression_stage == best_compression_stage
++        is_best = is_best_by_accuracy or compression_stage > best_compression_stage
++        return is_best
++
++    def _save_checkpoint(self, model, trial, metrics=None, metrics_minsubnet=None, metrics_supernet=None):
+         # In all cases, including ddp/dp/deepspeed, self.model is always a reference to the model we
+         # want to save except FullyShardedDDP.
+         # assert unwrap_model(model) is self.model, "internal model should be a reference to self.model"
+@@ -2429,9 +2672,42 @@ class Trainer:
+                 self.state.best_metric = metric_value
+                 self.state.best_model_checkpoint = output_dir
+ 
++        #boostrapNAS state
++        if (
++            self.compression_ctrl is not None and self.args.metric_for_best_model is not None
++            and metrics_supernet is not None and metrics_minsubnet is not None
++        ):
++            metric_to_check = self.args.metric_for_best_model
++            if not metric_to_check.startswith("eval_"):
++                metric_to_check = f"eval_{metric_to_check}"
++            metric_supernet_value = metrics_supernet[metric_to_check]
++            metrics_minsubnet_value = metrics_minsubnet[metric_to_check]
++
++            self.state.supernet_acc = metric_supernet_value
++            self.state.min_subnet_acc = metrics_minsubnet_value
++
++            operator = np.greater if self.args.greater_is_better else np.less
++            if(
++                self.state.supernet_best_acc is None
++                or self.state.best_supernet_model_checkpoint is None
++                or self.is_boostrapNAS_best_accuracy(metric_supernet_value, self.state.supernet_best_acc, operator,
++                                                          self.compression_stage, self.best_compression_stage)
++            ):
++                self.state.supernet_best_acc = metric_supernet_value
++                self.state.best_supernet_model_checkpoint = output_dir
++            if(
++                self.state.min_subnet_best_acc is None
++                or self.is_boostrapNAS_best_accuracy(metrics_minsubnet_value, self.state.min_subnet_best_acc, operator,
++                                                          self.compression_stage, self.best_compression_stage)
++            ):
++                self.state.min_subnet_best_acc = metrics_minsubnet_value
++
+         # Save the Trainer state
+         if self.args.should_save:
+             self.state.save_to_json(os.path.join(output_dir, TRAINER_STATE_NAME))
++            if isinstance(self.compression_ctrl, ProgressiveShrinkingController):
++                elasticity_state = self.compression_ctrl.elasticity_controller.get_compression_state()
++                torch.save(elasticity_state, os.path.join(output_dir, "elasticity_state.pt"))
+ 
+         # Save RNG state in non-distributed training
+         rng_states = {
+@@ -2706,6 +2982,57 @@ class Trainer:
+ 
+         return ctx_manager
+ 
++    def training_step_sandwich_rule(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], sandwich_num: int = 3) -> torch.Tensor:
++        model.train()
++        inputs = self._prepare_inputs(inputs)
++
++        if is_sagemaker_mp_enabled():
++            loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps)
++            return loss_mb.reduce_mean().detach().to(self.args.device)
++
++        # max subnet & random subnet & min subnet
++        teacher_outputs = None
++        for arch_id in range(sandwich_num):
++            if arch_id == 0:
++                self.compression_ctrl.multi_elasticity_handler.activate_maximum_subnet()
++            elif arch_id == sandwich_num - 1:
++                self.compression_ctrl.multi_elasticity_handler.activate_minimum_subnet()
++            else:
++                self.compression_ctrl.step() # random subnet
++
++            with self.compute_loss_context_manager():
++                if self.kd_teacher_model is not None:
++                    loss, teacher_outputs = self.compute_kd_loss(model, self.kd_teacher_model, inputs, teacher_outputs=teacher_outputs)
++                else:
++                    loss = self.compute_loss(model, inputs)
++
++            if self.args.n_gpu > 1:
++                loss = loss.mean()  # mean() to average on multi-gpu parallel training
++
++            if self.args.gradient_accumulation_steps > 1 and not self.deepspeed:
++                # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
++                loss = loss / self.args.gradient_accumulation_steps
++
++            if self.compression_ctrl is not None:
++                compression_loss = self.compression_ctrl.loss()
++                loss += compression_loss
++
++            if self.do_grad_scaling:
++                self.scaler.scale(loss).backward()
++            elif self.use_apex:
++                with amp.scale_loss(loss, self.optimizer) as scaled_loss:
++                    scaled_loss.backward()
++            elif self.deepspeed:
++                # loss gets scaled under gradient_accumulation_steps in deepspeed
++                loss = self.deepspeed.backward(loss)
++            else:
++                loss.backward()
++
++            if arch_id == sandwich_num - 2:
++                return_loss = loss.detach()
++
++        return return_loss
++
+     def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
+         """
+         Perform a training step on a batch of inputs.
+@@ -2732,7 +3059,10 @@ class Trainer:
+             return loss_mb.reduce_mean().detach().to(self.args.device)
+ 
+         with self.compute_loss_context_manager():
+-            loss = self.compute_loss(model, inputs)
++            if self.kd_teacher_model is not None:
++                loss, _ = self.compute_kd_loss(model, self.kd_teacher_model, inputs)
++            else:
++                loss = self.compute_loss(model, inputs)
+ 
+         if self.args.n_gpu > 1:
+             loss = loss.mean()  # mean() to average on multi-gpu parallel training
+@@ -2741,6 +3071,10 @@ class Trainer:
+             # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
+             loss = loss / self.args.gradient_accumulation_steps
+ 
++        if self.compression_ctrl is not None:
++            compression_loss = self.compression_ctrl.loss()
++            loss += compression_loss
++
+         if self.do_grad_scaling:
+             self.scaler.scale(loss).backward()
+         elif self.use_apex:
+@@ -2754,6 +3088,70 @@ class Trainer:
+ 
+         return loss.detach()
+ 
++    def compute_kd_loss(self, model, teacher_model, inputs, distillation_weight = 0.9,
++                        return_outputs = False, teacher_outputs = None):
++        temperature = self.args.kd_temperature
++
++        def compute_distillation_loss(student_outputs, teacher_outputs):
++            if not teacher_outputs:
++                with torch.no_grad():
++                    teacher_outputs = teacher_model(**inputs)
++            teacher_logits = teacher_outputs.logits
++            student_logits = student_outputs.logits
++            return F.kl_div(
++                input=F.log_softmax(student_logits / temperature, dim=-1),
++                target=F.softmax(teacher_logits / temperature, dim=-1),
++                reduction="batchmean",
++            ) * (temperature**2), teacher_outputs
++
++        def compute_self_attention_distillation_loss(student_outputs, teacher_outputs):
++            if not teacher_outputs:
++                with torch.no_grad():
++                    teacher_outputs = teacher_model(return_dict=True, output_attentions=True, output_hidden_states=True, **inputs)
++
++            distillation_loss = 0
++
++            # attention loss
++            assert len(teacher_outputs.attentions) % len(student_outputs.attentions) == 0
++            if len(teacher_outputs.attentions) != len(student_outputs.attentions):
++                raise NotImplementedError
++            for stu_output, tea_output in zip(student_outputs.attentions, teacher_outputs.attentions):
++                stu_output = torch.where(stu_output <= -1e-2, torch.zeros_like(stu_output), stu_output)
++                tea_output = torch.where(tea_output <= -1e-2, torch.zeros_like(tea_output), tea_output)
++                distillation_loss += self.mse_loss(stu_output, tea_output)
++
++            # hidden state loss
++            for stu_output, tea_output in zip(student_outputs.hidden_states, teacher_outputs.hidden_states):
++                stu_output = torch.where(stu_output <= -1e-2, torch.zeros_like(stu_output), stu_output)
++                tea_output = torch.where(tea_output <= -1e-2, torch.zeros_like(tea_output), tea_output)
++                distillation_loss += self.mse_loss(stu_output, tea_output)
++
++            # pred loss
++            distillation_loss += F.kl_div(
++                input=F.log_softmax(student_outputs.logits / temperature, dim=-1),
++                target=F.softmax(teacher_outputs.logits / temperature, dim=-1),
++                reduction="batchmean",
++            ) * (temperature**2)
++            return distillation_loss, teacher_outputs
++
++
++        if self.label_smoother is not None:
++            raise NotImplementedError
++
++        if self.args.kd_mode == 'original': # AAAI: self.args.kd_mode == 'original
++            outputs = model(**inputs)
++            distillation_loss, teacher_outputs = compute_distillation_loss(outputs, teacher_outputs)
++            loss = (1 - distillation_weight) * outputs['loss'] + distillation_weight * distillation_loss
++        elif self.args.kd_mode == 'self_attention_distillation': # failed exp
++            outputs = model(return_dict=True, output_attentions=True, output_hidden_states=True, **inputs)
++            distillation_loss, teacher_outputs = compute_self_attention_distillation_loss(outputs, teacher_outputs)
++        else:
++            raise NotImplementedError
++
++        loss = (1 - distillation_weight) * outputs['loss'] + distillation_weight * distillation_loss
++
++        return (loss, teacher_outputs, outputs) if return_outputs else (loss, teacher_outputs)
++
+     def compute_loss(self, model, inputs, return_outputs=False):
+         """
+         How the loss is computed by Trainer. By default, all models return the loss in the first element.
+@@ -2881,11 +3279,16 @@ class Trainer:
+         # They can then be reloaded using `from_pretrained()`
+         xm.rendezvous("saving_checkpoint")
+         if not isinstance(self.model, PreTrainedModel):
+-            if isinstance(unwrap_model(self.model), PreTrainedModel):
++            unwrapped_model = unwrap_model(self.model)
++            if isinstance(unwrapped_model, NNCFNetwork):
++                is_pretrained = isinstance(unwrapped_model.get_nncf_wrapped_model(), PreTrainedModel)
++            else:
++                is_pretrained = isinstance(unwrapped_model, PreTrainedModel)
++            if is_pretrained:
+                 unwrap_model(self.model).save_pretrained(
+                     output_dir,
+                     is_main_process=self.args.should_save,
+-                    state_dict=self.model.state_dict(),
++                    state_dict=unwrapped_model.state_dict(),
+                     save_function=xm.save,
+                 )
+             else:
+@@ -2897,6 +3300,11 @@ class Trainer:
+         if self.tokenizer is not None and self.args.should_save:
+             self.tokenizer.save_pretrained(output_dir)
+ 
++        if isinstance(self.compression_ctrl, ProgressiveShrinkingController):
++            elasticity_state = self.compression_ctrl.elasticity_controller.get_compression_state()
++            torch.save(elasticity_state, os.path.join(output_dir, "elasticity_state.pt"))
++
++
+     def _save(self, output_dir: Optional[str] = None, state_dict=None):
+         # If we are executing this function, we are the process zero, so we don't check for that.
+         output_dir = output_dir if output_dir is not None else self.args.output_dir
+@@ -2994,6 +3402,7 @@ class Trainer:
+         eval_dataset: Optional[Dataset] = None,
+         ignore_keys: Optional[List[str]] = None,
+         metric_key_prefix: str = "eval",
++        active_subnet: Dict[str, str] = None
+     ) -> Dict[str, float]:
+         """
+         Run evaluation and returns metrics.
+@@ -3036,6 +3445,9 @@ class Trainer:
+             metric_key_prefix=metric_key_prefix,
+         )
+ 
++        if active_subnet is not None:
++            output.metrics.update(active_subnet)
++
+         total_batch_size = self.args.eval_batch_size * self.args.world_size
+         if f"{metric_key_prefix}_jit_compilation_time" in output.metrics:
+             start_time += output.metrics[f"{metric_key_prefix}_jit_compilation_time"]
+diff --git a/src/transformers/trainer_callback.py b/src/transformers/trainer_callback.py
+index 808c1b470..4e798a639 100644
+--- a/src/transformers/trainer_callback.py
++++ b/src/transformers/trainer_callback.py
+@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Union
+ 
+ import numpy as np
+ from tqdm.auto import tqdm
++from nncf.api.compression import CompressionStage
+ 
+ from .trainer_utils import IntervalStrategy, has_length
+ from .training_args import TrainingArguments
+@@ -88,6 +89,13 @@ class TrainerState:
+     trial_name: str = None
+     trial_params: Dict[str, Union[str, float, int, bool]] = None
+ 
++    #boostrapNAS
++    supernet_best_acc: float = None
++    supernet_acc: float = None
++    min_subnet_best_acc: float = None
++    min_subnet_acc: float = None
++    best_supernet_model_checkpoint: Optional[str] = None
++
+     def __post_init__(self):
+         if self.log_history is None:
+             self.log_history = []
+@@ -479,6 +487,8 @@ class ProgressCallback(TrainerCallback):
+     def on_step_end(self, args, state, control, **kwargs):
+         if state.is_local_process_zero:
+             self.training_bar.update(state.global_step - self.current_step)
++            if hasattr(state, "curr_loss"):
++                self.training_bar.set_postfix(loss=state.curr_loss)
+             self.current_step = state.global_step
+ 
+     def on_prediction_step(self, args, state, control, eval_dataloader=None, **kwargs):
+diff --git a/src/transformers/training_args.py b/src/transformers/training_args.py
+index 44f28ff99..aec69a339 100644
+--- a/src/transformers/training_args.py
++++ b/src/transformers/training_args.py
+@@ -165,6 +165,8 @@ class TrainingArguments:
+             Whether to run training or not. This argument is not directly used by [`Trainer`], it's intended to be used
+             by your training/evaluation scripts instead. See the [example
+             scripts](https://github.com/huggingface/transformers/tree/main/examples) for more details.
++        do_search (:obj:`bool`, `optional`, defaults to :obj:`False`):
++            Whether to run boostrapNAS searching or not.
+         do_eval (`bool`, *optional*):
+             Whether to run evaluation on the validation set or not. Will be set to `True` if `evaluation_strategy` is
+             different from `"no"`. This argument is not directly used by [`Trainer`], it's intended to be used by your
+@@ -614,8 +616,12 @@ class TrainingArguments:
+     )
+ 
+     do_train: bool = field(default=False, metadata={"help": "Whether to run training."})
++    do_search: bool = field(default=False, metadata={"help": "Whether to run boostrapNAS search."})
+     do_eval: bool = field(default=False, metadata={"help": "Whether to run eval on the dev set."})
+     do_predict: bool = field(default=False, metadata={"help": "Whether to run predictions on the test set."})
++    kd_teacher_model: Optional[str] = field(default=None, metadata={"help": "BootstrapNAS kd teacher model"})
++    kd_mode: Optional[str] = field(default='original')
++    kd_temperature: Optional[float] = field(default=2.0)
+     evaluation_strategy: Union[IntervalStrategy, str] = field(
+         default="no",
+         metadata={"help": "The evaluation strategy to use."},
+@@ -1158,6 +1164,12 @@ class TrainingArguments:
+         },
+     )
+ 
++    nncf_config: str = field(default=None,
++                             metadata={"help": "NNCF configuration .json file for compression-enabled training"})
++
++    to_onnx: str = field(default=None,
++                         metadata={"help": "Name of the ONNX model file to export the model to."})
++
+     def __post_init__(self):
+         # expand paths, if not os.makedirs("~/bar") will make directory
+         # in the current directory instead of the actual home
+diff --git a/src/transformers/utils/__init__.py b/src/transformers/utils/__init__.py
+index a44a8360c..3f8c4ee37 100644
+--- a/src/transformers/utils/__init__.py
++++ b/src/transformers/utils/__init__.py
+@@ -175,6 +175,7 @@ from .import_utils import (
+ 
+ 
+ WEIGHTS_NAME = "pytorch_model.bin"
++NNCF_PT_STATE_NAME = "nncf_state.bin"
+ WEIGHTS_INDEX_NAME = "pytorch_model.bin.index.json"
+ TF2_WEIGHTS_NAME = "tf_model.h5"
+ TF2_WEIGHTS_INDEX_NAME = "tf_model.h5.index.json"
+@@ -184,6 +185,7 @@ FLAX_WEIGHTS_INDEX_NAME = "flax_model.msgpack.index.json"
+ SAFE_WEIGHTS_NAME = "model.safetensors"
+ SAFE_WEIGHTS_INDEX_NAME = "model.safetensors.index.json"
+ CONFIG_NAME = "config.json"
++NNCF_CONFIG_NAME = "nncf_config.json"
+ FEATURE_EXTRACTOR_NAME = "preprocessor_config.json"
+ IMAGE_PROCESSOR_NAME = FEATURE_EXTRACTOR_NAME
+ GENERATION_CONFIG_NAME = "generation_config.json"
