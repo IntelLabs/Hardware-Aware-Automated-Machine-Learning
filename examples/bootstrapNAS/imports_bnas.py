@@ -1,4 +1,6 @@
-print("Imported PyTorch and NNCF")
+# Copyright 2023 Intel Corporation
+# SPDX-License-Identifier: MIT
+
 import sys
 import time
 import zipfile
@@ -32,3 +34,5 @@ from nncf.torch.model_creation import create_nncf_network
 from bootstrapnas_utils import resnet50_cifar10, validate, train_epoch, create_folders_demo, create_cifar10_dataloader, download_file
 
 torch.manual_seed(0)
+
+print("Imported PyTorch and NNCF")
