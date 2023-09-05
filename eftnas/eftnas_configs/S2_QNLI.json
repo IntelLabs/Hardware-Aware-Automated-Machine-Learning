@@ -139,5 +139,5 @@
     "model_name_or_path": "../eftnas_results/S2_QNLI/pretrain_weight", //91.8
     "kd_teacher_model": "ModelTC/bert-base-uncased-qnli",
     "movement_sparsity_total_epochs": 6,
-    "reorg_cache_model": "../eftnas_results/S2_QNLI/movement_sparsity_0/pytorch_model.bin",
+    // "reorg_cache_model": "../eftnas_results/S2_QNLI/movement_sparsity_0/pytorch_model.bin",
 }

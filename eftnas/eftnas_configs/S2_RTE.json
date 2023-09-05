@@ -159,6 +159,6 @@
     "model_name_or_path": "../eftnas_results/S2_RTE/pretrain_weight", // 72.56
     "kd_teacher_model": "anirudh21/electra-base-discriminator-finetuned-rte", //"textattack/bert-base-uncased-RTE", //"yoshitomo-matsubara/bert-large-uncased-rte",
     "movement_sparsity_total_epochs": 10,
-    "reorg_cache_model": "../eftnas_results/S2_RTE/movement_sparsity_0/pytorch_model.bin",
+    // "reorg_cache_model": "../eftnas_results/S2_RTE/movement_sparsity_0/pytorch_model.bin",
 }
 

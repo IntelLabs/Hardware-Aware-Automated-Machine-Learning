@@ -1193,7 +1193,7 @@ index 739ba4ce..e2b888cc 100644
      def load_state(self, state: Dict[str, Any]) -> None:
          """
 diff --git a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_width.py b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_width.py
-index dfb9f49e..693505fb 100644
+index dfb9f49e..94b09610 100644
 --- a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_width.py
 +++ b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_width.py
 @@ -22,6 +22,7 @@ from torch import nn
@@ -1324,6 +1324,15 @@ index dfb9f49e..693505fb 100644
  
  class EWHandlerStateNames:
      WIDTH_NUM_PARAMS_INDICATOR = "width_num_params_indicator"
+@@ -685,7 +726,7 @@ class ElasticWidthHandler(SingleElasticityHandler):
+                         if not previous_nodes:
+                             break
+                         for previous in previous_nodes:
+-                            if "output_mask" in previous.data:
++                            if "output_mask" in previous.attributes:
+                                 if previous.attributes["output_mask"] is not None:
+                                     input_masks.append(previous.attributes["output_mask"])
+                                     input_masks = [i for i in input_masks if i]
 @@ -781,7 +822,25 @@ class ElasticWidthHandler(SingleElasticityHandler):
                  filters_importance = self._filter_importance_fn(weight, minfo.module.target_weight_dim_for_compression)
                  cumulative_filters_importance += filters_importance

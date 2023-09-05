@@ -160,5 +160,5 @@
     "movement_sparsity_total_epochs": 8,
     "model_name_or_path": "csarron/bert-base-uncased-squad-v1", // 88.2
     "kd_teacher_model": "csarron/bert-base-uncased-squad-v1",
-    "reorg_cache_model": "../eftnas_results/S1_SQuADv1/movement_sparsity_0/pytorch_model.bin"
+    // "reorg_cache_model": "../eftnas_results/S1_SQuADv1/movement_sparsity_0/pytorch_model.bin"
 }

@@ -165,5 +165,5 @@
     "model_name_or_path": "bert-base-uncased",
     "kd_teacher_model": "ModelTC/bert-base-uncased-cola",// 59.6
     "movement_sparsity_total_epochs": 30,
-    "reorg_cache_model": "../eftnas_results/S1_CoLA/movement_sparsity_0/pytorch_model.bin"
+    // "reorg_cache_model": "../eftnas_results/S1_CoLA/movement_sparsity_0/pytorch_model.bin"
 }

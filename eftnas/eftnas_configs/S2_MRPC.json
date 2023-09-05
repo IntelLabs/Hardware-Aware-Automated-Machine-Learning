@@ -132,5 +132,5 @@
     "model_name_or_path": "../eftnas_results/S2_MRPC/pretrain_weight",
     "kd_teacher_model": "Intel/bert-base-uncased-mrpc",
     "movement_sparsity_total_epochs": 10,
-    "reorg_cache_model": "../eftnas_results/S2_MRPC/movement_sparsity_0/pytorch_model.bin",
+    // "reorg_cache_model": "../eftnas_results/S2_MRPC/movement_sparsity_0/pytorch_model.bin",
 }

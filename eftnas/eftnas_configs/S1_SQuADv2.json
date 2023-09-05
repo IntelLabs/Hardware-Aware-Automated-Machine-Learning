@@ -160,5 +160,5 @@
     "model_name_or_path": "deepset/bert-base-uncased-squad2", // 78.56
     "kd_teacher_model": "deepset/bert-base-uncased-squad2",
     "dataset_name": "squad_v2",
-    "reorg_cache_model": "../eftnas_results/S1_SQuADv2/movement_sparsity_0/pytorch_model.bin"
+    // "reorg_cache_model": "../eftnas_results/S1_SQuADv2/movement_sparsity_0/pytorch_model.bin"
 }

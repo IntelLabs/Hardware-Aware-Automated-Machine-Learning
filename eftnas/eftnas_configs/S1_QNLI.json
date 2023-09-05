@@ -163,5 +163,5 @@
     "model_name_or_path": "ModelTC/bert-base-uncased-qnli", //91.8
     "kd_teacher_model": "ModelTC/bert-base-uncased-qnli",
     "movement_sparsity_total_epochs": 6,
-    "reorg_cache_model": "../eftnas_results/S1_QNLI/movement_sparsity_0/pytorch_model.bin"
+    // "reorg_cache_model": "../eftnas_results/S1_QNLI/movement_sparsity_0/pytorch_model.bin"
 }

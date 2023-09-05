@@ -160,5 +160,5 @@
     "model_name_or_path": "../eftnas_results/S2_QQP/pretrain_weight",//91.00
     "kd_teacher_model": "JeremiahZ/bert-base-uncased-qqp",
     "movement_sparsity_total_epochs": 6,
-    "reorg_cache_model": "../eftnas_results/S2_QQP/movement_sparsity_0/pytorch_model.bin",
+    // "reorg_cache_model": "../eftnas_results/S2_QQP/movement_sparsity_0/pytorch_model.bin",
 }

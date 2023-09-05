@@ -131,5 +131,5 @@
     "model_name_or_path": "../eftnas_results/S2_SST2/pretrain_weight", // 93.23
     "kd_teacher_model": "JeremiahZ/bert-base-uncased-sst2", //"yoshitomo-matsubara/bert-large-uncased-sst2",
     "movement_sparsity_total_epochs": 6,
-    "reorg_cache_model": "../eftnas_results/S2_SST2/movement_sparsity_0/pytorch_model.bin",
+    // "reorg_cache_model": "../eftnas_results/S2_SST2/movement_sparsity_0/pytorch_model.bin",
 }
