@@ -1193,7 +1193,7 @@ index 739ba4ce..e2b888cc 100644
      def load_state(self, state: Dict[str, Any]) -> None:
          """
 diff --git a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_width.py b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_width.py
-index dfb9f49e..94b09610 100644
+index dfb9f49e..4d52ae89 100644
 --- a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_width.py
 +++ b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_width.py
 @@ -22,6 +22,7 @@ from torch import nn
@@ -1383,8 +1383,8 @@ index dfb9f49e..94b09610 100644
 +            replace_name = ele.node_name.split("/")[-2][len("NNCFLinear[") : -1]
 +            for correlated_name in ["query", "key", "value"]:
 +                node = self._propagation_graph.get_node_by_name(ele.node_name.replace(replace_name, correlated_name))
-+                if "output_mask" in node.data:
-+                    reorder_indexes = node.data["output_mask"].tensor
++                if "output_mask" in node.attributes:
++                    reorder_indexes = node.attributes["output_mask"].tensor
 +                    return reorder_indexes
 +
 +            # brute - force way to compute this <-- can use automatic block search in the future
@@ -1422,7 +1422,7 @@ index dfb9f49e..94b09610 100644
 +        weight_importance_model = getattr(self, "weight_importance_model", None)
 +        assert weight_importance_model is not None, "Please add weight_importance_model before using this function"
 +        for node in self._propagation_graph.get_all_nodes():
-+            node.data.pop("output_mask", None)
++            node.attributes.pop("output_mask", None)
 +
 +        for group in self._pruned_module_groups_info.get_all_clusters():
 +            filters_num = torch.tensor([get_filters_num(minfo.module) for minfo in group.elements])
@@ -1444,7 +1444,7 @@ index dfb9f49e..94b09610 100644
 +
 +                if reorder_indexes is not None:
 +                    node = self._propagation_graph.get_node_by_id(ele.nncf_node_id)
-+                    node.data["output_mask"] = PTNNCFTensor(reorder_indexes)
++                    node.attributes["output_mask"] = PTNNCFTensor(reorder_indexes)
 +                    print(f"add reorder indexes for node: {ele.node_name}")
 +
 +        # 2. Propagating masks across the graph
@@ -1521,7 +1521,7 @@ index dfb9f49e..94b09610 100644
      def _create_dynamic_conv_input_op(conv_layer_attrs: BaseLayerAttributes, node_name: str) -> UpdateWeight:
          assert isinstance(conv_layer_attrs, ConvolutionLayerAttributes)
 diff --git a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/filter_reorder.py b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/filter_reorder.py
-index ef10ff53..49693f46 100644
+index ef10ff53..5ae61edc 100644
 --- a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/filter_reorder.py
 +++ b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/filter_reorder.py
 @@ -17,6 +17,7 @@ from nncf.common.logging import nncf_logger
@@ -1566,9 +1566,9 @@ index ef10ff53..49693f46 100644
 +                    if not previous_nodes:
 +                        break
 +                    for previous in previous_nodes:
-+                        if "output_mask" in previous.data:
-+                            if previous.data["output_mask"] is not None:
-+                                input_masks.append(previous.data["output_mask"])
++                        if "output_mask" in previous.attributes:
++                            if previous.attributes["output_mask"] is not None:
++                                input_masks.append(previous.attributes["output_mask"])
 +                                input_masks = [i for i in input_masks if i]
 +                            else:
 +                                nodes_to_check.append(previous)
@@ -1579,7 +1579,7 @@ index ef10ff53..49693f46 100644
 +                    input_mask = input_masks[0]
 +                    if input_mask and input_mask.tensor.size(0) == filters_num:
 +                        prev_node = self._graph.get_previous_nodes(ori_node)[0]
-+                        prev_node.data["output_mask"] = input_mask
++                        prev_node.attributes["output_mask"] = input_mask
 diff --git a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/multi_elasticity_handler.py b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/multi_elasticity_handler.py
 index 4beca169..a4304ce5 100644
 --- a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/multi_elasticity_handler.py
@@ -2593,7 +2593,7 @@ index 5e06f395..a28a7055 100644
          nncf_config.register_extra_structs(
              [
 diff --git a/nncf/torch/pruning/operations.py b/nncf/torch/pruning/operations.py
-index 67f2fad4..ba57957c 100644
+index 67f2fad4..1d62a73a 100644
 --- a/nncf/torch/pruning/operations.py
 +++ b/nncf/torch/pruning/operations.py
 @@ -23,6 +23,7 @@ from nncf.common.pruning.operations import BatchNormPruningOp
@@ -2622,7 +2622,7 @@ index 67f2fad4..ba57957c 100644
 +
 +    @classmethod
 +    def output_reorder(cls, model: NNCFNetwork, node: NNCFNode, graph: NNCFGraph):
-+        reorder_indexes = node.data["output_mask"]
++        reorder_indexes = node.attributes["output_mask"]
 +        if reorder_indexes is None:
 +            return
 +        embedding = model.get_containing_module(node.node_name)
@@ -2630,7 +2630,7 @@ index 67f2fad4..ba57957c 100644
 +        embedding.weight.data = torch.index_select(embedding.weight.data, 1, reorder_indexes)
 +        nncf_logger.debug(
 +            "Reordered output channels (first 10 reorder indexes {}) of Embedding: {} ".format(
-+                reorder_indexes[:10], node.data["key"]
++                reorder_indexes[:10], node.attributes["key"]
 +            )
 +        )
 +
