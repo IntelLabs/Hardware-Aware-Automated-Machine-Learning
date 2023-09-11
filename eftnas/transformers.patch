@@ -342,7 +342,7 @@ index 9bb52f797..359c9c8ba 100755
      if training_args.do_eval:
          logger.info("*** Evaluate ***")
 diff --git a/examples/pytorch/question-answering/run_qa.py b/examples/pytorch/question-answering/run_qa.py
-index c760e51d8..79002a3fa 100755
+index c760e51d8..3c35d2ecd 100755
 --- a/examples/pytorch/question-answering/run_qa.py
 +++ b/examples/pytorch/question-answering/run_qa.py
 @@ -21,15 +21,31 @@ Fine-tuning the library models for question answering using a slightly adapted v
@@ -792,7 +792,7 @@ index a486405b6..d730a7402 100644
 +
 +        return (loss, teacher_outputs, outputs) if return_outputs else (loss, teacher_outputs)
 diff --git a/examples/pytorch/text-classification/run_glue.py b/examples/pytorch/text-classification/run_glue.py
-index 55fc6bbc3..41f3169a3 100755
+index 55fc6bbc3..8067feee4 100755
 --- a/examples/pytorch/text-classification/run_glue.py
 +++ b/examples/pytorch/text-classification/run_glue.py
 @@ -20,13 +20,21 @@ import logging
@@ -1076,10 +1076,12 @@ index 55fc6bbc3..41f3169a3 100755
      # Training
      if training_args.do_train:
          checkpoint = None
-@@ -529,18 +726,45 @@ def main():
+@@ -529,18 +726,47 @@ def main():
          elif last_checkpoint is not None:
              checkpoint = last_checkpoint
          train_result = trainer.train(resume_from_checkpoint=checkpoint)
++        if training_args.only_generate_importance_weight:
++            return
 +        if nncf_config is not None and isinstance(compression_ctrl, ProgressiveShrinkingController):
 +            train_result, model, elasticity_ctrl = train_result
 +
@@ -1263,7 +1265,7 @@ index 474b92f72..18486e32f 100644
  
          outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
 diff --git a/src/transformers/trainer.py b/src/transformers/trainer.py
-index f7fb3558d..de00b137d 100755
+index f7fb3558d..6ad47d140 100755
 --- a/src/transformers/trainer.py
 +++ b/src/transformers/trainer.py
 @@ -32,6 +32,9 @@ from collections.abc import Mapping
@@ -1484,7 +1486,7 @@ index f7fb3558d..de00b137d 100755
              len_dataloader = len(train_dataloader)
              num_update_steps_per_epoch = len_dataloader // args.gradient_accumulation_steps
              num_update_steps_per_epoch = max(num_update_steps_per_epoch, 1)
-@@ -1870,8 +1980,68 @@ class Trainer:
+@@ -1870,8 +1980,72 @@ class Trainer:
                      # AT THE VERY END!
                      _ = list(train_dataloader.sampler)
  
@@ -1531,6 +1533,10 @@ index f7fb3558d..de00b137d 100755
 +                            space[handler_id.value] = handler.get_search_space()
 +                        return space
 +
++                    if self.args.only_generate_importance_weight:
++                        logger.info("Only generate importance weight. Return")
++                        return None, model, self.compression_ctrl.elasticity_controller
++
 +                    self.compression_ctrl.multi_elasticity_handler.activate_minimum_subnet()
 +                    flops, weight_params = self.compression_ctrl.multi_elasticity_handler.count_flops_and_weights_for_active_subnet()
 +                    logger.info(f"min subnet flops: {flops / 2e6} weight params: {weight_params/1e6}")
@@ -1553,7 +1559,7 @@ index f7fb3558d..de00b137d 100755
              if isinstance(train_dataloader, DataLoader) and isinstance(train_dataloader.sampler, DistributedSampler):
                  train_dataloader.sampler.set_epoch(epoch)
              elif hasattr(train_dataloader, "dataset") and isinstance(train_dataloader.dataset, IterableDatasetShard):
-@@ -1907,6 +2077,9 @@ class Trainer:
+@@ -1907,6 +2081,9 @@ class Trainer:
  
              step = -1
              for step, inputs in enumerate(epoch_iterator):
@@ -1563,7 +1569,7 @@ index f7fb3558d..de00b137d 100755
                  total_batched_samples += 1
                  if rng_to_sync:
                      self._load_rng_state(resume_from_checkpoint)
-@@ -1926,6 +2099,12 @@ class Trainer:
+@@ -1926,6 +2103,12 @@ class Trainer:
  
                  if step % args.gradient_accumulation_steps == 0:
                      self.control = self.callback_handler.on_step_begin(args, self.state, self.control)
@@ -1576,7 +1582,7 @@ index f7fb3558d..de00b137d 100755
  
                  if (
                      (total_batched_samples % args.gradient_accumulation_steps != 0)
-@@ -1935,9 +2114,15 @@ class Trainer:
+@@ -1935,9 +2118,15 @@ class Trainer:
                  ):
                      # Avoid unnecessary DDP synchronization since there will be no backward pass on this example.
                      with model.no_sync():
@@ -1594,7 +1600,7 @@ index f7fb3558d..de00b137d 100755
  
                  if (
                      args.logging_nan_inf_filter
-@@ -2011,9 +2196,10 @@ class Trainer:
+@@ -2011,9 +2200,10 @@ class Trainer:
                          if not isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                              self.lr_scheduler.step()
  
@@ -1606,7 +1612,7 @@ index f7fb3558d..de00b137d 100755
                      self.control = self.callback_handler.on_step_end(args, self.state, self.control)
  
                      self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval)
-@@ -2032,6 +2218,8 @@ class Trainer:
+@@ -2032,6 +2222,8 @@ class Trainer:
  
              self.control = self.callback_handler.on_epoch_end(args, self.state, self.control)
              self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval)
@@ -1615,7 +1621,7 @@ index f7fb3558d..de00b137d 100755
  
              if DebugOption.TPU_METRICS_DEBUG in self.args.debug:
                  if is_torch_tpu_available():
-@@ -2088,6 +2276,9 @@ class Trainer:
+@@ -2088,6 +2280,9 @@ class Trainer:
  
          self.control = self.callback_handler.on_train_end(args, self.state, self.control)
  
@@ -1625,7 +1631,7 @@ index f7fb3558d..de00b137d 100755
          return TrainOutput(self.state.global_step, train_loss, metrics)
  
      def _get_output_dir(self, trial):
-@@ -2279,6 +2470,13 @@ class Trainer:
+@@ -2279,6 +2474,13 @@ class Trainer:
              logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
              logs["learning_rate"] = self._get_learning_rate()
  
@@ -1639,7 +1645,7 @@ index f7fb3558d..de00b137d 100755
              self._total_loss_scalar += tr_loss_scalar
              self._globalstep_last_logged = self.state.global_step
              self.store_flos()
-@@ -2286,19 +2484,58 @@ class Trainer:
+@@ -2286,19 +2488,58 @@ class Trainer:
              self.log(logs)
  
          metrics = None
@@ -1709,7 +1715,7 @@ index f7fb3558d..de00b137d 100755
  
              # Run delayed LR scheduler now that metrics are populated
              if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-@@ -2349,7 +2586,13 @@ class Trainer:
+@@ -2349,7 +2590,13 @@ class Trainer:
          if is_torch_tpu_available():
              xm.set_rng_state(checkpoint_rng_state["xla"])
  
@@ -1724,7 +1730,7 @@ index f7fb3558d..de00b137d 100755
          # In all cases, including ddp/dp/deepspeed, self.model is always a reference to the model we
          # want to save except FullyShardedDDP.
          # assert unwrap_model(model) is self.model, "internal model should be a reference to self.model"
-@@ -2429,9 +2672,42 @@ class Trainer:
+@@ -2429,9 +2676,42 @@ class Trainer:
                  self.state.best_metric = metric_value
                  self.state.best_model_checkpoint = output_dir
  
@@ -1767,7 +1773,7 @@ index f7fb3558d..de00b137d 100755
  
          # Save RNG state in non-distributed training
          rng_states = {
-@@ -2706,6 +2982,57 @@ class Trainer:
+@@ -2706,6 +2986,57 @@ class Trainer:
  
          return ctx_manager
  
@@ -1825,7 +1831,7 @@ index f7fb3558d..de00b137d 100755
      def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
          """
          Perform a training step on a batch of inputs.
-@@ -2732,7 +3059,10 @@ class Trainer:
+@@ -2732,7 +3063,10 @@ class Trainer:
              return loss_mb.reduce_mean().detach().to(self.args.device)
  
          with self.compute_loss_context_manager():
@@ -1837,7 +1843,7 @@ index f7fb3558d..de00b137d 100755
  
          if self.args.n_gpu > 1:
              loss = loss.mean()  # mean() to average on multi-gpu parallel training
-@@ -2741,6 +3071,10 @@ class Trainer:
+@@ -2741,6 +3075,10 @@ class Trainer:
              # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
              loss = loss / self.args.gradient_accumulation_steps
  
@@ -1848,7 +1854,7 @@ index f7fb3558d..de00b137d 100755
          if self.do_grad_scaling:
              self.scaler.scale(loss).backward()
          elif self.use_apex:
-@@ -2754,6 +3088,70 @@ class Trainer:
+@@ -2754,6 +3092,70 @@ class Trainer:
  
          return loss.detach()
  
@@ -1919,7 +1925,7 @@ index f7fb3558d..de00b137d 100755
      def compute_loss(self, model, inputs, return_outputs=False):
          """
          How the loss is computed by Trainer. By default, all models return the loss in the first element.
-@@ -2881,11 +3279,16 @@ class Trainer:
+@@ -2881,11 +3283,16 @@ class Trainer:
          # They can then be reloaded using `from_pretrained()`
          xm.rendezvous("saving_checkpoint")
          if not isinstance(self.model, PreTrainedModel):
@@ -1938,7 +1944,7 @@ index f7fb3558d..de00b137d 100755
                      save_function=xm.save,
                  )
              else:
-@@ -2897,6 +3300,11 @@ class Trainer:
+@@ -2897,6 +3304,11 @@ class Trainer:
          if self.tokenizer is not None and self.args.should_save:
              self.tokenizer.save_pretrained(output_dir)
  
@@ -1950,7 +1956,7 @@ index f7fb3558d..de00b137d 100755
      def _save(self, output_dir: Optional[str] = None, state_dict=None):
          # If we are executing this function, we are the process zero, so we don't check for that.
          output_dir = output_dir if output_dir is not None else self.args.output_dir
-@@ -2994,6 +3402,7 @@ class Trainer:
+@@ -2994,6 +3406,7 @@ class Trainer:
          eval_dataset: Optional[Dataset] = None,
          ignore_keys: Optional[List[str]] = None,
          metric_key_prefix: str = "eval",
@@ -1958,7 +1964,7 @@ index f7fb3558d..de00b137d 100755
      ) -> Dict[str, float]:
          """
          Run evaluation and returns metrics.
-@@ -3036,6 +3445,9 @@ class Trainer:
+@@ -3036,6 +3449,9 @@ class Trainer:
              metric_key_prefix=metric_key_prefix,
          )
  
@@ -2004,7 +2010,7 @@ index 808c1b470..4e798a639 100644
  
      def on_prediction_step(self, args, state, control, eval_dataloader=None, **kwargs):
 diff --git a/src/transformers/training_args.py b/src/transformers/training_args.py
-index 44f28ff99..aec69a339 100644
+index 44f28ff99..9b6807be4 100644
 --- a/src/transformers/training_args.py
 +++ b/src/transformers/training_args.py
 @@ -165,6 +165,8 @@ class TrainingArguments:
@@ -2016,20 +2022,21 @@ index 44f28ff99..aec69a339 100644
          do_eval (`bool`, *optional*):
              Whether to run evaluation on the validation set or not. Will be set to `True` if `evaluation_strategy` is
              different from `"no"`. This argument is not directly used by [`Trainer`], it's intended to be used by your
-@@ -614,8 +616,12 @@ class TrainingArguments:
+@@ -614,8 +616,13 @@ class TrainingArguments:
      )
  
      do_train: bool = field(default=False, metadata={"help": "Whether to run training."})
 +    do_search: bool = field(default=False, metadata={"help": "Whether to run boostrapNAS search."})
      do_eval: bool = field(default=False, metadata={"help": "Whether to run eval on the dev set."})
      do_predict: bool = field(default=False, metadata={"help": "Whether to run predictions on the test set."})
++    only_generate_importance_weight: bool = field(default=False, metadata={"help" :"Only generation importance weight"})
 +    kd_teacher_model: Optional[str] = field(default=None, metadata={"help": "BootstrapNAS kd teacher model"})
 +    kd_mode: Optional[str] = field(default='original')
 +    kd_temperature: Optional[float] = field(default=2.0)
      evaluation_strategy: Union[IntervalStrategy, str] = field(
          default="no",
          metadata={"help": "The evaluation strategy to use."},
-@@ -1158,6 +1164,12 @@ class TrainingArguments:
+@@ -1158,6 +1165,12 @@ class TrainingArguments:
          },
      )
  
