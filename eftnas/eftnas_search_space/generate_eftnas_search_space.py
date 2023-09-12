@@ -86,9 +86,9 @@ class AutoSearchSpaceGenerator:
         load_ctrl_state(sparsity_weight, compression_ctrl)
         return compression_ctrl
 
-    def get_macs_for_thre(self, thre, output_dir = '/home/yzheng/AutoML/projs/reorg_mask/tmp_resu'):
+    def get_macs_for_thre(self, thre, output_dir = 'projs/reorg_mask/tmp_resu'):
         def create_subnet_config_based_on_csv(csv_file):
-            # an ugly func to generate config based on csv file -- currently only work for bert/vit model
+            # func to generate config based on csv file -- currently only work for bert/vit model
             subnet_width_group = {}
             supernet_width_group = {}
             group_idx = 0
