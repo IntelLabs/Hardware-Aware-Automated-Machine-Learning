@@ -237,7 +237,7 @@ if __name__ == "__main__":
     N = 5
     args = get_argument_parser()
     # nncf config should include all possible blocks (both elastic depth and elastic width)--> search space will be generated based on those groups
-    template_nncf_config = load_nncf_config('./aaai_configs/eftnas_search_space_demo.json')
+    template_nncf_config = load_nncf_config('./eftnas_configs/eftnas_search_space_demo.json')
     sparsity_weight = os.path.join(args.importance_weight_dir, 'movement_sparsity_0/pytorch_model.bin')
     assert os.path.exists(sparsity_weight), "importance weight dir is incorrect"
 
