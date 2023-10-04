@@ -1,0 +1,928 @@
+diff --git a/exps/default/first_try.py b/exps/default/first_try.py
+new file mode 100644
+index 0000000..cced781
+--- /dev/null
++++ b/exps/default/first_try.py
+@@ -0,0 +1,59 @@
++#!/usr/bin/env python3
++# -*- coding:utf-8 -*-
++# Copyright (c) Megvii, Inc. and its affiliates.
++
++import os
++
++import torch.nn as nn
++
++from yolox.exp import Exp as MyExp
++
++
++class Exp(MyExp):
++    def __init__(self):
++        super(Exp, self).__init__()
++        self.depth = 0.33
++        self.width = 0.25
++        self.input_size = (416, 416)
++        self.random_size = (10, 20)
++        self.mosaic_scale = (0.5, 1.5)
++        self.test_size = (416, 416)
++        self.mosaic_prob = 0.5
++        self.enable_mixup = False
++        self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
++
++        # ADDED
++        self.num_classes = 20
++        self.data_dir = "datasets/VOC2007"
++        self.train_ann = "instances_train.json"
++        self.val_ann = "instances_val.json"
++        self.max_epoch = 60
++        self.no_aug_epochs = -1
++        self.ema = False
++        self.data_num_workers = 0
++        self.eval_interval = 5
++
++    def get_model(self, sublinear=False):
++
++        def init_yolo(M):
++            for m in M.modules():
++                if isinstance(m, nn.BatchNorm2d):
++                    m.eps = 1e-3
++                    m.momentum = 0.03
++        if "model" not in self.__dict__:
++            from yolox.models import YOLOX, YOLOPAFPN, YOLOXHead
++            in_channels = [256, 512, 1024]
++            # NANO model use depthwise = True, which is main difference.
++            backbone = YOLOPAFPN(
++                self.depth, self.width, in_channels=in_channels,
++                act=self.act, depthwise=True,
++            )
++            head = YOLOXHead(
++                self.num_classes, self.width, in_channels=in_channels,
++                act=self.act, depthwise=True
++            )
++            self.model = YOLOX(backbone, head)
++
++        self.model.apply(init_yolo)
++        self.model.head.initialize_biases(1e-2)
++        return self.model
+diff --git a/exps/default/yolox_nano_voc-e50.py b/exps/default/yolox_nano_voc-e50.py
+new file mode 100644
+index 0000000..be2d5cd
+--- /dev/null
++++ b/exps/default/yolox_nano_voc-e50.py
+@@ -0,0 +1,59 @@
++#!/usr/bin/env python3
++# -*- coding:utf-8 -*-
++# Copyright (c) Megvii, Inc. and its affiliates.
++
++import os
++
++import torch.nn as nn
++
++from yolox.exp import Exp as MyExp
++
++
++class Exp(MyExp):
++    def __init__(self):
++        super(Exp, self).__init__()
++        self.depth = 0.33
++        self.width = 0.25
++        self.input_size = (416, 416)
++        self.random_size = (10, 20)
++        self.mosaic_scale = (0.5, 1.5)
++        self.test_size = (416, 416)
++        self.mosaic_prob = 0.5
++        self.enable_mixup = False
++        self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
++
++        # ADDED
++        self.num_classes = 20
++        self.data_dir = "datasets/VOC2007"
++        self.train_ann = "instances_train.json"
++        self.val_ann = "instances_val.json"
++        self.max_epoch = 50
++        self.no_aug_epochs = -1
++        self.ema = False
++        self.data_num_workers = 0
++        self.eval_interval = 5
++
++    def get_model(self, sublinear=False):
++
++        def init_yolo(M):
++            for m in M.modules():
++                if isinstance(m, nn.BatchNorm2d):
++                    m.eps = 1e-3
++                    m.momentum = 0.03
++        if "model" not in self.__dict__:
++            from yolox.models import YOLOX, YOLOPAFPN, YOLOXHead
++            in_channels = [256, 512, 1024]
++            # NANO model use depthwise = True, which is main difference.
++            backbone = YOLOPAFPN(
++                self.depth, self.width, in_channels=in_channels,
++                act=self.act, depthwise=True,
++            )
++            head = YOLOXHead(
++                self.num_classes, self.width, in_channels=in_channels,
++                act=self.act, depthwise=True
++            )
++            self.model = YOLOX(backbone, head)
++
++        self.model.apply(init_yolo)
++        self.model.head.initialize_biases(1e-2)
++        return self.model
+diff --git a/nncf_config_yolox_bootstrapNAS.json b/nncf_config_yolox_bootstrapNAS.json
+new file mode 100644
+index 0000000..d39962d
+--- /dev/null
++++ b/nncf_config_yolox_bootstrapNAS.json
+@@ -0,0 +1,168 @@
++{
++    "model": "YOLOX",
++    "input_info": {
++        "sample_size": [1, 3, 416, 416]
++    },
++
++    "bootstrapNAS": {
++        "training": {
++            "algorithm": "progressive_shrinking",
++            "progressivity_of_elasticity": ["width"],
++            "batchnorm_adaptation": { "num_bn_adaptation_samples": 1500 },
++            "sandwich_rule": true,
++            // "kd_teacher": true,
++            // "kd_ratio": 0.1,
++            "schedule": {
++                "list_stage_descriptions": [
++                    {"train_dims": ["width"], "epochs": 60, "init_lr": 3e-4, "depth_indicator": 1, "width_indicator": 3}
++                ]
++            },
++            "elasticity": {
++                "available_elasticity_dims": ["width"],
++                "width": {
++                    "overwrite_groups": [
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPDarknet[backbone]/Sequential[dark4]/DWConv[0]/BaseConv[pconv]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPDarknet[backbone]/Sequential[dark4]/CSPLayer[1]/Sequential[m]/Bottleneck[0]/DWConv[conv2]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOPAFPN[backbone]/CSPDarknet[backbone]/Sequential[dark4]/CSPLayer[1]/Sequential[m]/Bottleneck[0]/BaseConv[conv1]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPDarknet[backbone]/Sequential[dark4]/CSPLayer[1]/Sequential[m]/Bottleneck[1]/DWConv[conv2]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOPAFPN[backbone]/CSPDarknet[backbone]/Sequential[dark4]/CSPLayer[1]/Sequential[m]/Bottleneck[1]/BaseConv[conv1]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPDarknet[backbone]/Sequential[dark4]/CSPLayer[1]/Sequential[m]/Bottleneck[2]/DWConv[conv2]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOPAFPN[backbone]/CSPDarknet[backbone]/Sequential[dark4]/CSPLayer[1]/Sequential[m]/Bottleneck[2]/BaseConv[conv1]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPDarknet[backbone]/Sequential[dark5]/SPPBottleneck[1]/BaseConv[conv2]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPDarknet[backbone]/Sequential[dark5]/CSPLayer[2]/BaseConv[conv1]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPDarknet[backbone]/Sequential[dark5]/CSPLayer[2]/Sequential[m]/Bottleneck[0]/DWConv[conv2]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOPAFPN[backbone]/CSPDarknet[backbone]/Sequential[dark5]/CSPLayer[2]/Sequential[m]/Bottleneck[0]/BaseConv[conv1]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPDarknet[backbone]/Sequential[dark5]/CSPLayer[2]/BaseConv[conv3]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPLayer[C3_p4]/BaseConv[conv1]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPLayer[C3_p4]/Sequential[m]/Bottleneck[0]/DWConv[conv2]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOPAFPN[backbone]/CSPLayer[C3_p4]/Sequential[m]/Bottleneck[0]/BaseConv[conv1]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPLayer[C3_p4]/BaseConv[conv3]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/DWConv[bu_conv2]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOPAFPN[backbone]/CSPLayer[C3_p3]/BaseConv[conv3]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPLayer[C3_n3]/BaseConv[conv1]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPLayer[C3_n3]/Sequential[m]/Bottleneck[0]/DWConv[conv2]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOPAFPN[backbone]/CSPLayer[C3_n3]/Sequential[m]/Bottleneck[0]/BaseConv[conv1]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/DWConv[bu_conv1]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOPAFPN[backbone]/CSPLayer[C3_n3]/BaseConv[conv3]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPLayer[C3_n4]/BaseConv[conv1]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPLayer[C3_n4]/Sequential[m]/Bottleneck[0]/DWConv[conv2]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOPAFPN[backbone]/CSPLayer[C3_n4]/Sequential[m]/Bottleneck[0]/BaseConv[conv1]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOPAFPN[backbone]/CSPLayer[C3_n4]/BaseConv[conv3]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[cls_convs]/Sequential[0]/DWConv[1]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOXHead[head]/ModuleList[cls_convs]/Sequential[0]/DWConv[0]/BaseConv[pconv]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[cls_convs]/Sequential[0]/DWConv[1]/BaseConv[pconv]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[reg_convs]/Sequential[0]/DWConv[0]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOXHead[head]/ModuleList[cls_convs]/Sequential[0]/DWConv[0]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOXHead[head]/ModuleList[stems]/BaseConv[0]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[reg_convs]/Sequential[0]/DWConv[1]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOXHead[head]/ModuleList[reg_convs]/Sequential[0]/DWConv[0]/BaseConv[pconv]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[reg_convs]/Sequential[0]/DWConv[1]/BaseConv[pconv]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[cls_convs]/Sequential[1]/DWConv[1]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOXHead[head]/ModuleList[cls_convs]/Sequential[1]/DWConv[0]/BaseConv[pconv]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[cls_convs]/Sequential[1]/DWConv[1]/BaseConv[pconv]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[reg_convs]/Sequential[1]/DWConv[0]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOXHead[head]/ModuleList[cls_convs]/Sequential[1]/DWConv[0]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOXHead[head]/ModuleList[stems]/BaseConv[1]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[reg_convs]/Sequential[1]/DWConv[1]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOXHead[head]/ModuleList[reg_convs]/Sequential[1]/DWConv[0]/BaseConv[pconv]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[reg_convs]/Sequential[1]/DWConv[1]/BaseConv[pconv]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[cls_convs]/Sequential[2]/DWConv[1]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOXHead[head]/ModuleList[cls_convs]/Sequential[2]/DWConv[0]/BaseConv[pconv]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[cls_convs]/Sequential[2]/DWConv[1]/BaseConv[pconv]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[reg_convs]/Sequential[2]/DWConv[0]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOXHead[head]/ModuleList[cls_convs]/Sequential[2]/DWConv[0]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOXHead[head]/ModuleList[stems]/BaseConv[2]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[reg_convs]/Sequential[2]/DWConv[1]/BaseConv[dconv]/NNCFConv2d[conv]/conv2d_0",
++                            "YOLOX/YOLOXHead[head]/ModuleList[reg_convs]/Sequential[2]/DWConv[0]/BaseConv[pconv]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                        [
++                            "YOLOX/YOLOXHead[head]/ModuleList[reg_convs]/Sequential[2]/DWConv[1]/BaseConv[pconv]/NNCFConv2d[conv]/conv2d_0",
++                        ],
++                    ],
++                    "overwrite_groups_widths": [
++                        [128, 96, 72], [64, 48, 32],
++                        [64, 48, 32], [64, 48, 32], [256, 200, 152],
++                        [128, 96, 72], [128, 96, 72], [256, 200, 152],
++                        [64, 48, 32], [64, 48, 32], [128, 96, 72],
++                        [64, 48, 32], [64, 48, 32], [64, 48, 32],
++                        [128, 96, 72], [128, 96, 72], [128, 96, 72],
++                        [256, 200, 152], [64, 48, 32], [64, 48, 32], [64, 48, 32], [64, 48, 32], [64, 48, 32],
++                        [64, 48, 32], [64, 48, 32], [64, 48, 32], [64, 48, 32], [64, 48, 32], [64, 48, 32],
++                        [64, 48, 32], [64, 48, 32], [64, 48, 32], [64, 48, 32]
++                    ]
++                },
++            }
++        },
++        "search": {
++            "algorithm": "NSGA2",
++            "batchnorm_adaptation": { "num_bn_adaptation_samples": 1500 },
++            "num_evals": 600,
++            "population": 30,
++            "acc_delta": 1.0,
++            "ref_acc": 58.76
++        }
++    }
++}
+diff --git a/pyproject.toml b/pyproject.toml
+new file mode 100755
+index 0000000..cdf9dd6
+--- /dev/null
++++ b/pyproject.toml
+@@ -0,0 +1,34 @@
++[tool.poetry]
++name = "yolox"
++version = "0.1.0"
++description = ""
++authors = ["Your Name <you@example.com>"]
++readme = "README.md"
++
++[tool.poetry.dependencies]
++python = "^3.8"
++loguru = "^0.7.0"
++torch = "1.13.0a0+git49444c3"
++numpy = "^1.23"
++torchvision = "^0.15.0"
++opencv-python = "4.5.5.64"
++tqdm = "^4.65.0"
++thop = "^0.1.1.post2209072238"
++ninja = "^1.10"
++tabulate = "^0.9.0"
++psutil = "^5.9.5"
++tensorboard = "^2.12.2"
++onnx = ">=1.13.0"
++onnx-simplifier = "0.4.10"
++cython = "^0.29.34"
++ipykernel = "^6.22.0"
++protobuf = "3.20.3"
++nncf = "2.5.0"
++openvino-dev = "^2023.0.1"
++onnxruntime = "^1.15.1"
++pycocotools = "^2.0.7"
++
++
++[build-system]
++requires = ["poetry-core"]
++build-backend = "poetry.core.masonry.api"
+diff --git a/tools/train.py b/tools/train.py
+index d57f420..984d9b2 100644
+--- a/tools/train.py
++++ b/tools/train.py
+@@ -94,6 +94,7 @@ def make_parser():
+         default=None,
+         nargs=argparse.REMAINDER,
+     )
++    parser.add_argument("--nncf_config_path", default=None, type=str, help="NNCF config when training with NNCF tool.")
+     return parser
+
+
+diff --git a/yolox/core/trainer.py b/yolox/core/trainer.py
+index ba6b817..096218a 100644
+--- a/yolox/core/trainer.py
++++ b/yolox/core/trainer.py
+@@ -4,9 +4,12 @@
+ import datetime
+ import os
+ import time
++from shutil import copyfile
++from copy import deepcopy
+ from loguru import logger
+
+ import torch
++import torch.nn as nn
+ from torch.nn.parallel import DistributedDataParallel as DDP
+ from torch.utils.tensorboard import SummaryWriter
+
+@@ -60,9 +63,20 @@ class Trainer:
+         self.meter = MeterBuffer(window_size=exp.print_interval)
+         self.file_name = os.path.join(exp.output_dir, args.experiment_name)
+
++        # NNCF config
++        self.nncf_config_path = args.nncf_config_path  # NNCF enabed if given
++        self.do_nncf = self.nncf_config_path is not None
++        if self.do_nncf:
++            # flag to see compression_ctrl.compression_stage()
++            self.nncf_compression_done = False
++
+         if self.rank == 0:
+             os.makedirs(self.file_name, exist_ok=True)
+
++            if self.do_nncf:
++                # copy nncf config --> filename
++                copyfile(self.nncf_config_path, os.path.join(self.file_name, 'nncf_config.json'))
++
+         setup_logger(
+             self.file_name,
+             distributed_rank=self.rank,
+@@ -70,8 +84,146 @@ class Trainer:
+             mode="a",
+         )
+
++    ### NNCF BootstrapNAS
++    def train_bootstrap_nas(self):
++        from nncf.experimental.torch.nas.bootstrapNAS import EpochBasedTrainingAlgorithm
++        from nncf.experimental.torch.nas.bootstrapNAS import SearchAlgorithm
++
++        assert not self.use_model_ema
++
++        checkpoint_save_dir = self.file_name # "./checkpoint_save_dir"
++        DO_TRAIN = True  # search only if False
++        resuming_checkpoint_dir = None  # Set dir when resume
++        assert DO_TRAIN or resuming_checkpoint_dir  # resume_dir required when search only
++
++        if resuming_checkpoint_dir:
++            resuming_checkpoint_path = os.path.join(resuming_checkpoint_dir, "supernet_last.pth")
++        else:
++            resuming_checkpoint_path = None
++        if resuming_checkpoint_dir and not DO_TRAIN:
++            resuming_checkpoint_path_search = os.path.join(resuming_checkpoint_dir, "last_elasticity.pth")
++        os.makedirs(checkpoint_save_dir, exist_ok=True)
++
++        if resuming_checkpoint_path is None:
++            training_algorithm = EpochBasedTrainingAlgorithm.from_config(self.nncf_network, self.nncf_config)
++        else:
++            training_algorithm = EpochBasedTrainingAlgorithm.from_checkpoint(
++                self.nncf_network, self.bn_adapt_args, resuming_checkpoint_path)
++
++        ##
++        if self.is_distributed:
++            training_algorithm._model = DDP(training_algorithm._model, device_ids=[self.local_rank], broadcast_buffers=False)
++            self.optimizer = self.exp.get_optimizer(self.args.batch_size)
++
++        # get elasticity
++        print(training_algorithm._training_ctrl.multi_elasticity_handler.width_search_space)
++
++        def train_epoch_fn(loader, model_, compression_ctrl, epoch, optimizer_):
++            logger.info(f"train_epoch_fn: epoch={epoch}")
++            self.epoch = epoch
++            self.model = model_
++            self.compression_ctrl = compression_ctrl
++            self.optimizer = optimizer_
++            self.train_in_iter()
++
++        # training_algorithm.run() expects val func which return (top1,top5,loss).
++        # top1 value is used as metric and top5,loss is just for the logging purpose.
++        # here we return (ap50, ap50_90, dummy_loss) instead.
++        def validate_model_fn(model_, loader):
++            with adjust_status(model_, training=False):
++                (ap50_95, ap50, summary), predictions = self.exp.eval(
++                    model_, self.evaluator, self.is_distributed, return_outputs=True
++                )
++            dummy_loss = 1.0
++            print(f"===> validate_model_fn {ap50} {ap50_95}")
++            return ap50 * 100.0, ap50_95 * 100.0, dummy_loss
++
++        def validate_model_fn_top1(model_, loader):
++            with adjust_status(model_, training=False):
++                (ap50_95, ap50, summary), predictions = self.exp.eval(
++                    model_, self.evaluator, self.is_distributed, return_outputs=True
++                )
++            print(f"===> validate_model_fn_top1 {ap50}")
++            return ap50 * 100.0
++
++        val_loader = self.evaluator.dataloader
++
++        if DO_TRAIN:
++            tb = None
++            train_steps = None
++            self.nncf_network, elasticity_ctrl = training_algorithm.run(
++                train_epoch_fn,
++                self.train_loader,
++                validate_model_fn,
++                val_loader,
++                self.optimizer,
++                checkpoint_save_dir,
++                tb,
++                train_steps,
++            )
++
++            search_algo = SearchAlgorithm.from_config(self.nncf_network, elasticity_ctrl, self.nncf_config)
++        else:
++            # search only
++            # not that SearchAlgorithm.from_checkpoint() is not implemented
++            from nncf.experimental.torch.nas.bootstrapNAS.training.model_creator_helpers import resume_compression_from_state
++            from nncf.torch.checkpoint_loading import load_state
++
++            compression_state = torch.load(resuming_checkpoint_path_search)
++            model, elasticity_ctrl = resume_compression_from_state(self.nncf_network, compression_state)
++            model_weights = torch.load(resuming_checkpoint_path)["model_state"]
++            load_state(model, model_weights, is_resume=True)
++
++            top1_acc = validate_model_fn_top1(model, val_loader)
++            logger.info("SuperNetwork Top 1: {top1_acc}".format(top1_acc=top1_acc))
++
++            search_algo = SearchAlgorithm.from_config(model, elasticity_ctrl, self.nncf_config)
++        search_algo._log_dir = self.file_name
++
++        elasticity_ctrl, best_config, performance_metrics = search_algo.run(
++            validate_model_fn_top1, val_loader, checkpoint_save_dir, tensorboard_writer=None
++        )
++
++        logger.info("Best config: {best_config}".format(best_config=best_config))
++        logger.info("Performance metrics: {performance_metrics}".format(performance_metrics=performance_metrics))
++        search_algo.visualize_search_progression()
++
++        # Maximal subnet
++        elasticity_ctrl.multi_elasticity_handler.activate_maximum_subnet()
++        search_algo.bn_adaptation.run(self.nncf_network)
++        top1_acc = validate_model_fn_top1(self.nncf_network, val_loader)
++        logger.info(
++            "Maximal subnet Top1 acc: {top1_acc}, Macs: {macs}".format(
++                top1_acc=top1_acc,
++                macs=elasticity_ctrl.multi_elasticity_handler.count_flops_and_weights_for_active_subnet()[0] / 2000000,
++            )
++        )
++
++        # Best found subnet
++        elasticity_ctrl.multi_elasticity_handler.activate_subnet_for_config(best_config)
++        search_algo.bn_adaptation.run(self.nncf_network)
++        top1_acc = validate_model_fn_top1(self.nncf_network, val_loader)
++        logger.info(
++            "Best found subnet Top1 acc: {top1_acc}, Macs: {macs}".format(
++                top1_acc=top1_acc,
++                macs=elasticity_ctrl.multi_elasticity_handler.count_flops_and_weights_for_active_subnet()[0] / 2000000,
++            )
++        )
++        elasticity_ctrl.export_model(os.path.join(checkpoint_save_dir, "best_subnet.onnx"))
++
++        search_algo.search_progression_to_csv()
++        search_algo.evaluators_to_csv()
++
++        assert best_config == elasticity_ctrl.multi_elasticity_handler.get_active_config()
++    ### NNCF BootstrapNAS
++
+     def train(self):
+         self.before_train()
++
++        # Run NNCF bootstrapNAS specific train code
++        if self.do_nncf and "bootstrapNAS" in self.nncf_config.keys():
++            return self.train_bootstrap_nas()
++
+         try:
+             self.train_in_epoch()
+         except Exception:
+@@ -88,9 +240,74 @@ class Trainer:
+     def train_in_iter(self):
+         for self.iter in range(self.max_iter):
+             self.before_iter()
+-            self.train_one_iter()
++            if self.do_nncf and self.sandwich_rule:
++                self.train_one_iter_sandwich_rule()
++            else:
++                self.train_one_iter()
+             self.after_iter()
+
++    def compute_kd_teacher_loss(self, inps, targets, student_output, kd_ratio = 0.5):
++        if self.kd_teacher is None:
++            return torch.zeros_like(student_output["total_loss"])
++
++        with torch.no_grad():
++            teacher_output = self.kd_teacher(inps, targets, for_kd_loss=True)
++
++        # currently only compute kd-loss for bbox preds - use smoothl1loss - may change in the future
++        tea_bbox_preds = torch.cat(teacher_output['origin_bbox_preds'], 1).view(-1, 4)
++        stu_bbox_preds = torch.cat(student_output['origin_bbox_preds'], 1).view(-1, 4)
++        fg_mask, num_fg = student_output["fg_mask"], student_output["num_fg"]
++        hint_loss = self.sl1(stu_bbox_preds[fg_mask], tea_bbox_preds[fg_mask]).sum() / num_fg
++        return kd_ratio * hint_loss
++
++    def train_one_iter_sandwich_rule(self, sandwich_num = 3):
++        iter_start_time = time.time()
++
++        inps, targets = self.prefetcher.next()
++        inps = inps.to(self.data_type)
++        targets = targets.to(self.data_type)
++        targets.requires_grad = False
++        inps, targets = self.exp.preprocess(inps, targets, self.input_size)
++        data_end_time = time.time()
++
++        self.optimizer.zero_grad()
++
++        for arch_id in range(sandwich_num):
++            if arch_id == 0:
++                self.compression_ctrl.multi_elasticity_handler.activate_maximum_subnet()
++            elif arch_id == sandwich_num - 1:
++                self.compression_ctrl.multi_elasticity_handler.activate_minimum_subnet()
++            else:
++                self.compression_ctrl.step() # random subnet
++
++            with torch.cuda.amp.autocast(enabled=self.amp_training):
++                outputs = self.model(inps, targets, for_kd_loss=(self.kd_teacher is not None))
++
++            loss = outputs["total_loss"]
++            outputs["kd_loss"] = self.compute_kd_teacher_loss(inps, targets, outputs, self.kd_ratio)
++            loss += outputs["kd_loss"]
++            assert not self.amp_training  # assuming self.scaler is disabled
++            compression_loss = self.compression_ctrl.loss()
++            loss = loss + compression_loss
++            self.scaler.scale(loss).backward()
++
++        self.scaler.step(self.optimizer)
++        self.scaler.update()
++
++        if self.use_model_ema:
++            self.ema_model.update(self.model)
++
++        lr = self.compression_ctrl.scheduler.lr_scheduler.get_last_lr()[0]
++
++        iter_end_time = time.time()
++        self.meter.update(
++            iter_time=iter_end_time - iter_start_time,
++            data_time=data_end_time - iter_start_time,
++            lr=lr,
++            **outputs,
++        )
++
++
+     def train_one_iter(self):
+         iter_start_time = time.time()
+
+@@ -105,6 +322,10 @@ class Trainer:
+             outputs = self.model(inps, targets)
+
+         loss = outputs["total_loss"]
++        if self.do_nncf:
++            assert not self.amp_training  # assuming self.scaler is disabled
++            compression_loss = self.compression_ctrl.loss()
++            loss = loss + compression_loss
+
+         self.optimizer.zero_grad()
+         self.scaler.scale(loss).backward()
+@@ -114,9 +335,12 @@ class Trainer:
+         if self.use_model_ema:
+             self.ema_model.update(self.model)
+
+-        lr = self.lr_scheduler.update_lr(self.progress_in_iter + 1)
+-        for param_group in self.optimizer.param_groups:
+-            param_group["lr"] = lr
++        if self.do_nncf:
++            lr = self.compression_ctrl.scheduler.lr_scheduler.get_last_lr()[0]
++        else:
++            lr = self.lr_scheduler.update_lr(self.progress_in_iter + 1)
++            for param_group in self.optimizer.param_groups:
++                param_group["lr"] = lr
+
+         iter_end_time = time.time()
+         self.meter.update(
+@@ -163,11 +387,75 @@ class Trainer:
+         if self.args.occupy:
+             occupy_mem(self.local_rank)
+
+-        if self.is_distributed:
++        if not self.do_nncf and self.is_distributed:
+             model = DDP(model, device_ids=[self.local_rank], broadcast_buffers=False)
+
++        self.sandwich_rule = False
++        self.kd_teacher = None
++        self.kd_ratio = 0
++        if self.do_nncf:
++            # import json
++            import jstyleson as json
++            from nncf.config import NNCFConfig
++            from nncf.config.structures import BNAdaptationInitArgs
++            from nncf.torch.initialization import register_default_init_args, DefaultInitializingDataLoader
++            from nncf.torch import create_compressed_model
++            from nncf.torch.model_creation import create_nncf_network
++
++            nncf_config_dict = json.loads(open(self.nncf_config_path).read())
++            logger.info(f"NNCF json config: {nncf_config_dict}")
++            self.nncf_input_info = nncf_config_dict["input_info"]["sample_size"]
++            assert(len(self.nncf_input_info) == 4 and self.nncf_input_info[:2] == [1, 3])
++            nncf_config = NNCFConfig.from_dict(nncf_config_dict)
++            nncf_config.log_dir = self.file_name
++
++            # DefaultInitializingDataLoader expects train_loader that
++            # - original dataset return [input, target, ...]. this condition is met.
++            # - train_loader.batch_size return batchsize, But train_loader actually return None,
++            #   which cause error in create_compressed_model. Thus the customized class is required.
++            train_batch_size = self.args.batch_size
++            class DefaultInitializingDataLoaderFix(DefaultInitializingDataLoader):
++                @property
++                def batch_size(self):
++                    return train_batch_size
++                def get_inputs(self, dataloader_output):
++                    """Returns (args, kwargs) for the current model call to be made during the initialization process"""
++                    return (dataloader_output[0],), {"targets": dataloader_output[1].requires_grad_(False)}
++
++            init_dataloader = DefaultInitializingDataLoaderFix(self.train_loader)
++            if "bootstrapNAS" in nncf_config_dict.keys():
++                assert not self.use_model_ema
++                logger.warning("Do NNCF bootstrapNAS training")
++                # bootstrapNAS register
++                self.bn_adapt_args = BNAdaptationInitArgs(data_loader=init_dataloader, device=self.device)
++                nncf_config.register_extra_structs([self.bn_adapt_args])
++                self.original_model = model
++                if nncf_config['bootstrapNAS'].get('training', {}).get('kd_teacher', False):
++                    if not nncf_config['bootstrapNAS'].get('training', {}).get('sandwich_rule', False):
++                        raise NotImplementedError
++                    self.kd_teacher = deepcopy(model)
++                    self.kd_teacher.eval()
++                    self.sl1 = nn.SmoothL1Loss(reduction='none')
++                    self.kd_ratio = nncf_config['bootstrapNAS'].get('training', {}).get('kd_ratio', 0.1)
++                self.nncf_network = create_nncf_network(model, nncf_config)
++                self.nncf_config = nncf_config  # use it later
++                self.sandwich_rule = self.nncf_config['bootstrapNAS'].get('training', {}).get('sandwich_rule', False)
++
++                # original_model_graph = self.nncf_network.nncf.get_graph()
++                # original_model_graph.visualize_graph(os.path.join(self.file_name, "orignal_graph.dot"))
++                self.lr_scheduler = None # use StageLRScheduler within BootstrapNAS
++            else:
++                logger.warning("Do NNCF training")
++                nncf_config = register_default_init_args(nncf_config, init_dataloader)
++                self.original_model = model
++                self.compression_ctrl, model = create_compressed_model(self.original_model, nncf_config)
++                if self.is_distributed:
++                    self.compression_ctrl.distributed()
++            logger.info(f"nncf_config: {nncf_config}")
++
+         if self.use_model_ema:
+             self.ema_model = ModelEMA(model, 0.9998)
++
+             self.ema_model.updates = self.max_iter * self.start_epoch
+
+         self.model = model
+@@ -199,6 +487,25 @@ class Trainer:
+             if self.args.logger == "wandb":
+                 self.wandb_logger.finish()
+
++        if self.do_nncf:
++            # restore EMA weight before export (.pth weight is EMA weight)
++            if self.use_model_ema:
++                ckpt_filename = os.path.join(self.file_name, "latest_ckpt.pth")
++                ckpt = torch.load(ckpt_filename)["model"]
++                self.compression_ctrl.model.load_state_dict(ckpt)
++            # export ONNX
++            out_path_nostrip = os.path.join(self.file_name, "compressed_model_nostrip.onnx")
++            out_path_strip = os.path.join(self.file_name, "compressed_model_strip.onnx")
++            logger.info(f"Save nncf non-stripped model to {out_path_nostrip}")
++            self.compression_ctrl.export_model(out_path_nostrip)
++            logger.info(f"Save nncf stripped model to {out_path_strip}")
++            inference_model = self.compression_ctrl.strip(do_copy=False)
++            inference_model.eval().cpu()
++            dummy_input = torch.ones(tuple(self.nncf_input_info))
++            torch.onnx.export(inference_model, dummy_input, out_path_strip)
++            # Convert ONNX to OpenVINO, while shrinking pruned (0 weight) operators.
++            os.system(f"mo --input_model {out_path_strip} --transform Pruning --output_dir {self.file_name}")
++
+     def before_epoch(self):
+         logger.info("---> start train epoch{}".format(self.epoch + 1))
+
+@@ -214,6 +521,22 @@ class Trainer:
+             if not self.no_aug:
+                 self.save_ckpt(ckpt_name="last_mosaic_epoch")
+
++        if self.do_nncf:
++            self.compression_ctrl.scheduler.epoch_step()
++            # update nncf_compression_done flag
++            if not self.nncf_compression_done:
++                from nncf.api.compression import CompressionStage
++                stage = self.compression_ctrl.compression_stage()
++                self.nncf_compression_done = stage == CompressionStage.FULLY_COMPRESSED
++                # when compression done, update ema_model
++                if self.nncf_compression_done and self.use_model_ema:
++                    logger.info(f"NNCF compression done (stage={stage}). Update ema_model with decay=0.")
++                    saved_decay = self.ema_model.decay  # lambda with one arg
++                    self.ema_model.decay = lambda _: 0  # force decay=0
++                    self.ema_model.update(self.model)   # update with decay=0
++                    self.ema_model.decay = saved_decay  # restore decay function
++                    self.ema_model.updates = 0
++
+     def after_epoch(self):
+         self.save_ckpt(ckpt_name="latest")
+
+@@ -221,8 +544,14 @@ class Trainer:
+             all_reduce_norm(self.model)
+             self.evaluate_and_save_model()
+
++        if self.do_nncf:
++            logger.info("NNCF statistics: {}".format(self.compression_ctrl.statistics().to_str()))
++            compression_stage = self.compression_ctrl.compression_stage()
++            logger.info("NNCF compression_stage: {}".format(compression_stage))
++
+     def before_iter(self):
+-        pass
++        if self.do_nncf:
++            self.compression_ctrl.scheduler.step()
+
+     def after_iter(self):
+         """
+diff --git a/yolox/models/yolo_head.py b/yolox/models/yolo_head.py
+index 3e51768..331c3f1 100644
+--- a/yolox/models/yolo_head.py
++++ b/yolox/models/yolo_head.py
+@@ -139,7 +139,7 @@ class YOLOXHead(nn.Module):
+             b.data.fill_(-math.log((1 - prior_prob) / prior_prob))
+             conv.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
+
+-    def forward(self, xin, labels=None, imgs=None):
++    def forward(self, xin, labels=None, imgs=None, for_kd_loss=False):
+         outputs = []
+         origin_preds = []
+         x_shifts = []
+@@ -160,10 +160,10 @@ class YOLOXHead(nn.Module):
+             reg_output = self.reg_preds[k](reg_feat)
+             obj_output = self.obj_preds[k](reg_feat)
+
+-            if self.training:
++            if self.training or for_kd_loss:
+                 output = torch.cat([reg_output, obj_output, cls_output], 1)
+                 output, grid = self.get_output_and_grid(
+-                    output, k, stride_this_level, xin[0].type()
++                    output, k, stride_this_level, xin[0].detach().type()
+                 )
+                 x_shifts.append(grid[:, :, 0])
+                 y_shifts.append(grid[:, :, 1])
+@@ -172,7 +172,7 @@ class YOLOXHead(nn.Module):
+                     .fill_(stride_this_level)
+                     .type_as(xin[0])
+                 )
+-                if self.use_l1:
++                if self.use_l1 or for_kd_loss:
+                     batch_size = reg_output.shape[0]
+                     hsize, wsize = reg_output.shape[-2:]
+                     reg_output = reg_output.view(
+@@ -190,8 +190,8 @@ class YOLOXHead(nn.Module):
+
+             outputs.append(output)
+
+-        if self.training:
+-            return self.get_losses(
++        if self.training or for_kd_loss:
++            final_output = self.get_losses(
+                 imgs,
+                 x_shifts,
+                 y_shifts,
+@@ -208,9 +208,11 @@ class YOLOXHead(nn.Module):
+                 [x.flatten(start_dim=2) for x in outputs], dim=2
+             ).permute(0, 2, 1)
+             if self.decode_in_inference:
+-                return self.decode_outputs(outputs, dtype=xin[0].type())
++                final_output = self.decode_outputs(outputs, dtype=xin[0].detach().type())
+             else:
+-                return outputs
++                final_output = outputs
++
++        return final_output, [origin_preds]
+
+     def get_output_and_grid(self, output, k, stride, dtype):
+         grid = self.grids[k]
+@@ -410,6 +412,7 @@ class YOLOXHead(nn.Module):
+             loss_cls,
+             loss_l1,
+             num_fg / max(num_gts, 1),
++            fg_masks
+         )
+
+     def get_l1_target(self, l1_target, gt, stride, x_shifts, y_shifts, eps=1e-8):
+@@ -594,7 +597,7 @@ class YOLOXHead(nn.Module):
+             obj_output = self.obj_preds[k](reg_feat)
+
+             output = torch.cat([reg_output, obj_output, cls_output], 1)
+-            output, grid = self.get_output_and_grid(output, k, stride_this_level, xin[0].type())
++            output, grid = self.get_output_and_grid(output, k, stride_this_level, xin[0].detach().type())
+             x_shifts.append(grid[:, :, 0])
+             y_shifts.append(grid[:, :, 1])
+             expanded_strides.append(
+diff --git a/yolox/models/yolox.py b/yolox/models/yolox.py
+index 744ceea..b366031 100644
+--- a/yolox/models/yolox.py
++++ b/yolox/models/yolox.py
+@@ -25,14 +25,14 @@ class YOLOX(nn.Module):
+         self.backbone = backbone
+         self.head = head
+
+-    def forward(self, x, targets=None):
++    def forward(self, x, targets=None, for_kd_loss=False):
+         # fpn output content features of [dark3, dark4, dark5]
+         fpn_outs = self.backbone(x)
+
+-        if self.training:
++        if self.training or for_kd_loss:
+             assert targets is not None
+-            loss, iou_loss, conf_loss, cls_loss, l1_loss, num_fg = self.head(
+-                fpn_outs, targets, x
++            (loss, iou_loss, conf_loss, cls_loss, l1_loss, num_fg, fg_mask), head_outputs = self.head(
++                fpn_outs, targets, x, for_kd_loss
+             )
+             outputs = {
+                 "total_loss": loss,
+@@ -41,9 +41,12 @@ class YOLOX(nn.Module):
+                 "conf_loss": conf_loss,
+                 "cls_loss": cls_loss,
+                 "num_fg": num_fg,
++                "fg_mask": fg_mask
+             }
++            if for_kd_loss:
++                outputs.update({'origin_bbox_preds': head_outputs[0]})
+         else:
+-            outputs = self.head(fpn_outs)
++            outputs, head_outputs = self.head(fpn_outs)
+
+         return outputs
+
+diff --git a/yolox/utils/boxes.py b/yolox/utils/boxes.py
+index f71e8d9..7385e62 100644
+--- a/yolox/utils/boxes.py
++++ b/yolox/utils/boxes.py
+@@ -97,7 +97,7 @@ def bboxes_iou(bboxes_a, bboxes_b, xyxy=True):
+
+         area_a = torch.prod(bboxes_a[:, 2:], 1)
+         area_b = torch.prod(bboxes_b[:, 2:], 1)
+-    en = (tl < br).type(tl.type()).prod(dim=2)
++    en = (tl < br).type(tl.detach().type()).prod(dim=2)
+     area_i = torch.prod(br - tl, 2) * en  # * ((tl < br).all())
+     return area_i / (area_a[:, None] + area_b - area_i)
+
+diff --git a/yolox/utils/metric.py b/yolox/utils/metric.py
+index 506b582..5479747 100644
+--- a/yolox/utils/metric.py
++++ b/yolox/utils/metric.py
+@@ -126,6 +126,10 @@ class MeterBuffer(defaultdict):
+     def update(self, values=None, **kwargs):
+         if values is None:
+             values = {}
++        remove_columns = ['origin_bbox_preds', 'fg_mask']
++        for remove_col in remove_columns:
++            if remove_col in kwargs:
++                del kwargs[remove_col]
+         values.update(kwargs)
+         for k, v in values.items():
+             if isinstance(v, torch.Tensor):
