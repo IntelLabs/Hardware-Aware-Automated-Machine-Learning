@@ -552,7 +552,7 @@ def resnet50_cifar10(pretrained=False, progress=True, device="cpu", **kwargs):
 def create_folders_demo(base_model_name):
     from pathlib import Path
     # MODEL_DIR = Path("model")
-    MODEL_DIR = Path("../../models/pretrained")
+    MODEL_DIR = Path("../models/pretrained")
     OUTPUT_DIR = Path("output")
     DATA_DIR = Path("data")
     BASE_MODEL_NAME = base_model_name
