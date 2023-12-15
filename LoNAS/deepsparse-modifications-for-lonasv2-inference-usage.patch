@@ -1,0 +1,37 @@
+diff --git a/src/deepsparse/transformers/pipelines/pipeline.py b/src/deepsparse/transformers/pipelines/pipeline.py
+index 0d54449e..c1000bb0 100644
+--- a/src/deepsparse/transformers/pipelines/pipeline.py
++++ b/src/deepsparse/transformers/pipelines/pipeline.py
+@@ -174,6 +174,7 @@ class TransformersPipeline(Pipeline, Bucketable):
+         """
+         if onnx_input_names is None:
+             onnx_input_names = self.onnx_input_names
++        onnx_input_names = ["positions" if name == "position_ids" else name for name in onnx_input_names]
+         if not all(name in tokens for name in onnx_input_names):
+             raise ValueError(
+                 f"pipeline expected arrays with names {onnx_input_names}, "
+diff --git a/src/deepsparse/transformers/pipelines/text_generation.py b/src/deepsparse/transformers/pipelines/text_generation.py
+index 20d08a5f..4b316b2f 100644
+--- a/src/deepsparse/transformers/pipelines/text_generation.py
++++ b/src/deepsparse/transformers/pipelines/text_generation.py
+@@ -998,6 +998,7 @@ class TextGenerationPipeline(TransformersPipeline):
+             attention_mask=attention_mask,
+             causal_mask=causal_mask,
+             positions=positions,
++            position_ids=positions,
+         )
+         engine_inputs = [
+             engine_inputs_map[name] for name in self.engine.onnx_input_names_no_cache
+diff --git a/src/deepsparse/utils/onnx.py b/src/deepsparse/utils/onnx.py
+index ae0913ff..d5febe54 100644
+--- a/src/deepsparse/utils/onnx.py
++++ b/src/deepsparse/utils/onnx.py
+@@ -550,7 +550,7 @@ def overwrite_onnx_model_inputs_for_kv_cache_models(
+         # overwrite the batch size for all the inputs
+         external_input.type.tensor_type.shape.dim[0].dim_value = batch_size
+ 
+-        if external_input.name in ["input_ids", "positions"]:
++        if external_input.name in ["input_ids", "positions", "position_ids"]:
+             external_input.type.tensor_type.shape.dim[1].dim_value = input_ids_length
+         elif external_input.name == "attention_mask":
+             external_input.type.tensor_type.shape.dim[1].dim_value = sequence_length

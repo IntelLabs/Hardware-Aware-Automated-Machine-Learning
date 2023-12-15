@@ -1,0 +1,86 @@
+diff --git a/optimum/exporters/onnx/__main__.py b/optimum/exporters/onnx/__main__.py
+index 654f9a6..1aa76a1 100644
+--- a/optimum/exporters/onnx/__main__.py
++++ b/optimum/exporters/onnx/__main__.py
+@@ -175,6 +175,7 @@ def main_export(
+     pad_token_id: Optional[int] = None,
+     subfolder: str = "",
+     revision: str = "main",
++    adapter_path: str = None,
+     force_download: bool = False,
+     local_files_only: bool = False,
+     use_auth_token: Optional[Union[bool, str]] = None,
+@@ -358,6 +359,7 @@ def main_export(
+         model_name_or_path,
+         subfolder=subfolder,
+         revision=revision,
++        adapter_path=adapter_path,
+         cache_dir=cache_dir,
+         use_auth_token=use_auth_token,
+         local_files_only=local_files_only,
+diff --git a/optimum/exporters/tasks.py b/optimum/exporters/tasks.py
+index 4d3f9f9..e3417bf 100644
+--- a/optimum/exporters/tasks.py
++++ b/optimum/exporters/tasks.py
+@@ -1714,6 +1714,7 @@ class TasksManager:
+ 
+         model_type = None
+         model_class_name = None
++        adapter_path = model_kwargs.pop("adapter_path")
+         kwargs = {"subfolder": subfolder, "revision": revision, "cache_dir": cache_dir, **model_kwargs}
+ 
+         if library_name == "transformers":
+@@ -1766,6 +1767,13 @@ class TasksManager:
+                 logger.info("Loading PyTorch model in TensorFlow before exporting.")
+                 kwargs["from_pt"] = True
+                 model = model_class.from_pretrained(model_name_or_path, **kwargs)
++        if adapter_path is not None:
++            from peft import PeftModel
++            lora_model = PeftModel.from_pretrained(
++                model,
++                adapter_path,
++                **kwargs
++            )
+         return model
+ 
+     @staticmethod
+diff --git a/optimum/modeling_base.py b/optimum/modeling_base.py
+index ed2c4b4..02b4195 100644
+--- a/optimum/modeling_base.py
++++ b/optimum/modeling_base.py
+@@ -293,6 +293,7 @@ class OptimizedModel(PreTrainedModel):
+     def from_pretrained(
+         cls,
+         model_id: Union[str, Path],
++        adapter_path: Union[str, Path] = None,
+         export: bool = False,
+         force_download: bool = False,
+         use_auth_token: Optional[str] = None,
+@@ -373,6 +374,7 @@ class OptimizedModel(PreTrainedModel):
+             model_id=model_id,
+             config=config,
+             revision=revision,
++            adapter_path=adapter_path,
+             cache_dir=cache_dir,
+             force_download=force_download,
+             use_auth_token=use_auth_token,
+diff --git a/optimum/onnxruntime/modeling_decoder.py b/optimum/onnxruntime/modeling_decoder.py
+index ac33834..67f68f7 100644
+--- a/optimum/onnxruntime/modeling_decoder.py
++++ b/optimum/onnxruntime/modeling_decoder.py
+@@ -572,6 +572,7 @@ class ORTModelForCausalLM(ORTModel, GenerationMixin):
+         force_download: bool = True,
+         cache_dir: Optional[str] = None,
+         subfolder: str = "",
++        adapter_path: str = None,
+         local_files_only: bool = False,
+         trust_remote_code: bool = False,
+         use_cache: bool = True,
+@@ -606,6 +607,7 @@ class ORTModelForCausalLM(ORTModel, GenerationMixin):
+             legacy=False,
+             subfolder=subfolder,
+             revision=revision,
++            adapter_path=adapter_path,
+             cache_dir=cache_dir,
+             use_auth_token=use_auth_token,
+             local_files_only=local_files_only,
