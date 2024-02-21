@@ -1,6 +1,6 @@
 # EZNAS: Evolving Zero-Cost Proxies For Neural Architecture Scoring
 
-EZNAS is a genetic programming driven methodology for the automatic discovery of Zero-Cost Neural Architecture Scoring Metrics (ZC-NASMs). It aims to provide an interpretable, generalizable, and efficient approach to rank neural networks without the expensive training routines, significantly reducing the carbon footprint of Neural Architecture Search (NAS).
+EZNAS is a genetic programming-driven methodology for automatically discovering Zero-Cost Neural Architecture Scoring Metrics (ZC-NASMs). It aims to provide an interpretable, generalizable, and efficient approach to rank neural networks without the expensive training routines, significantly reducing the carbon footprint of Neural Architecture Search (NAS).
 
 ## Installation
 
