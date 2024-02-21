@@ -1,0 +1,132 @@
+{
+    "input_info": [
+        {
+            "sample_size": [1, 384],
+            "type": "long",
+            "keyword": "input_ids"
+        },
+        {
+            "sample_size": [1, 384],
+            "type": "long",
+            "keyword": "token_type_ids"
+        },
+        {
+            "sample_size": [1, 384],
+            "type": "long",
+            "keyword": "attention_mask"
+        }
+    ],
+    "bootstrapNAS": {
+        "training": {
+            "algorithm": "progressive_shrinking",
+            "progressivity_of_elasticity": ["width"],
+            "batchnorm_adaptation": {
+                "num_bn_adaptation_samples": 0
+            },
+            "schedule": {
+                "list_stage_descriptions": [
+                    {"train_dims": ["width"], "epochs": 3, "depth_indicator": 1, "width_indicator": 4, "init_lr": 3e-5, "epochs_lr": 3, "sample_rate": 1} //, "reorg_interval": 5}
+                ]
+            },
+            "elasticity": {
+                "available_elasticity_dims": ["width"],
+                "width": {
+                    "overwrite_groups": [
+                        [
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0"
+                        ],
+                        [
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0",
+                        ],
+                        [
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0",
+                        ],
+                        [
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0"
+                        ],
+                        [
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0",
+                        ],
+                        [
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0",
+                        ],
+                        [
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0",
+                        ],
+                        [
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[query]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[value]/linear_0",
+                        ],
+                        ["BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                    ],
+                    "overwrite_groups_widths": [
+                        [512, 448], [512, 320, 256], [512, 384], [512], [512], [512, 384], [512], [512, 256], [2048, 1976, 1229, 1059], [2048, 1980, 1186, 1038], [2048, 1942, 1205, 1075], [2048, 1860, 1054, 935], [2048, 1867, 982, 859], [2048, 1721, 825, 745], [2048, 1484, 719, 645], [2048, 1130, 516, 469]
+                    ],
+                    "add_dynamic_inputs": [
+                        "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "BertForQuestionAnswering/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                    ]
+                },
+            },
+        },
+        "search": {
+            "algorithm": "NSGA2",
+            "batchnorm_adaptation": {
+                "num_bn_adaptation_samples": 0
+            },
+            "num_evals": 400,
+            "population": 40,
+            "ref_acc": 77.9
+        }
+    },
+    "compression": [
+        {
+            "algorithm": "movement_sparsity",
+            "params": {
+                "warmup_start_epoch": 1,
+                "warmup_end_epoch": 4,
+                "importance_regularization_factor": 0.02,
+                "enable_structured_masking": true
+            },
+            "sparse_structure_by_scopes": [
+                {"mode": "block", "sparse_factors": [32, 32], "target_scopes": "{re}.*BertAttention.*"},
+                {"mode": "per_dim", "axis": 0, "target_scopes": "{re}.*BertIntermediate.*"},
+                {"mode": "per_dim", "axis": 1, "target_scopes": "{re}.*BertOutput.*"}
+            ],
+            "ignored_scopes": ["{re}.*NNCFEmbedding.*", "{re}.*qa_outputs.*", "{re}.*LayerNorm.*"]
+        }
+    ],
+    "movement_sparsity_total_epochs": 8,
+    "model_name_or_path": "deepset/bert-medium-squad2-distilled", //
+    "kd_teacher_model": "deepset/bert-base-uncased-squad2",
+    "dataset_name": "squad_v2",
+    // "reorg_cache_model": "../eftnas_results/S2_SQuADv2/movement_sparsity_0/pytorch_model.bin"
+}

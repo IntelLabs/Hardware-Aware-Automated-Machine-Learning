@@ -1,0 +1,2929 @@
+diff --git a/examples/experimental/torch/classification/bootstrap_nas.py b/examples/experimental/torch/classification/bootstrap_nas.py
+index 5ae16e5c..a1b38e73 100644
+--- a/examples/experimental/torch/classification/bootstrap_nas.py
++++ b/examples/experimental/torch/classification/bootstrap_nas.py
+@@ -10,30 +10,40 @@
+ # limitations under the License.
+ import os.path as osp
+ import sys
++import time
+ import warnings
++from functools import partial
+ from pathlib import Path
+ from shutil import copyfile
++from typing import Any
+ 
+ import torch
++import torch.distributed as dist
++import torch.nn.functional as F
+ from torch import nn
++from torch.cuda.amp.autocast_mode import autocast
+ 
+ from examples.common.paths import configure_paths
+ from examples.common.sample_config import SampleConfig
+ from examples.common.sample_config import create_sample_config
+-from examples.torch.classification.main import create_data_loaders
+-from examples.torch.classification.main import create_datasets
++from examples.experimental.torch.classification.get_importance_mask import create_data_loaders
++from examples.experimental.torch.classification.get_importance_mask import create_datasets
++from examples.experimental.torch.classification.get_importance_mask import validate
++from examples.torch.classification.main import AverageMeter
+ from examples.torch.classification.main import get_argument_parser
++from examples.torch.classification.main import get_lr
+ from examples.torch.classification.main import inception_criterion_fn
+ from examples.torch.classification.main import train_epoch
+-from examples.torch.classification.main import validate
+ from examples.torch.common.argparser import parse_args
+ from examples.torch.common.example_logger import logger
++from examples.torch.common.execution import ExecutionMode
+ from examples.torch.common.execution import get_execution_mode
+ from examples.torch.common.execution import set_seed
+ from examples.torch.common.execution import start_worker
+ from examples.torch.common.model_loader import load_model
+ from examples.torch.common.optimizer import get_parameter_groups
+ from examples.torch.common.optimizer import make_optimizer
++from examples.torch.common.utils import NullContextManager
+ from examples.torch.common.utils import SafeMLFLow
+ from examples.torch.common.utils import configure_device
+ from examples.torch.common.utils import configure_logging
+@@ -44,10 +54,15 @@ from examples.torch.common.utils import print_args
+ from nncf.config.structures import BNAdaptationInitArgs
+ from nncf.experimental.torch.nas.bootstrapNAS import EpochBasedTrainingAlgorithm
+ from nncf.experimental.torch.nas.bootstrapNAS import SearchAlgorithm
++from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import ElasticityDim
++from nncf.experimental.torch.nas.bootstrapNAS.elasticity.multi_elasticity_handler import SubnetConfig
++from nncf.torch import create_compressed_model
++from nncf.torch.checkpoint_loading import load_state
+ from nncf.torch.initialization import default_criterion_fn
+ from nncf.torch.initialization import wrap_dataloader_for_init
+ from nncf.torch.model_creation import create_nncf_network
+ from nncf.torch.utils import is_main_process
++from nncf.torch.utils import manual_seed
+ 
+ 
+ def get_nas_argument_parser():
+@@ -55,9 +70,43 @@ def get_nas_argument_parser():
+     parser.add_argument(
+         "--train-steps", default=None, type=int, help="Enables running training for the given number of steps"
+     )
++    parser.add_argument(
++        "--importance-mask-weight", default=None, type=str, help="importance mask weight for weight reorder"
++    )
+     return parser
+ 
+ 
++def convert_str_config(str_config):
++    # an ugly verison - assume elastic width in str_config
++    subnet_config = SubnetConfig()
++
++    assert "ElasticityDim.WIDTH" in str_config
++
++    if "ElasticityDim.KERNEL" in str_config:
++        raise NotImplementedError
++    if "ElasticityDim.DEPTH" in str_config:
++        str_width_config, str_depth_config = str_config.split("}), (<ElasticityDim.DEPTH: 'depth'>, ")
++    else:
++        str_width_config = str_config.split("})")[0]
++        str_depth_config = None
++
++    str_width_config = str_width_config.split("OrderedDict([(<ElasticityDim.WIDTH: 'width'>, {")[-1]
++    width_config = {}
++    for block in str_width_config.split(", "):
++        block_id, block_w = block.split(": ")
++        width_config[int(block_id)] = int(block_w)
++    subnet_config[ElasticityDim.WIDTH] = width_config
++
++    if str_depth_config is not None:
++        str_depth_config = str_depth_config.split(")])")[0]
++        depth_config = []
++        if str_depth_config != "[]":
++            depth_config = [int(block_id) for block_id in str_depth_config[1:-1].split(", ")]
++        subnet_config[ElasticityDim.DEPTH] = depth_config
++
++    return subnet_config
++
++
+ def label_smooth(target, num_classes: int, label_smoothing=0.1):
+     batch_size = target.size(0)
+     target = torch.unsqueeze(target, 1)
+@@ -77,6 +126,278 @@ def cross_entropy_with_label_smoothing(pred, target, label_smoothing=0.1):
+     return cross_entropy_loss_with_soft_target(pred, soft_target)
+ 
+ 
++def generate_importance_mask_weight(
++    model_state_dict,
++    debug_mode=False,
++    save_folder="movement_sparsity",
++    resume_model=None,
++    bnas_training_ctrl=None,
++    config=None,
++):
++    sparsity_model = load_model(
++        config["model"],
++        pretrained=is_pretrained_model_requested(config),
++        num_classes=config.get("num_classes", 1000),
++        model_params=config.get("model_params"),
++        weights_path=config.get("weights"),
++    )
++
++    sparsity_model.to(config.device)
++
++    _, sparsity_model = create_compressed_model(sparsity_model, config.nncf_config)
++    sparsity_model.load_state_dict(model_state_dict, strict=False)
++
++    load_state(sparsity_model, torch.load(resume_model, map_location=config.device)["state_dict"])
++
++    return sparsity_model
++
++
++# Only for running experiments with fixed set for batchnorm adapt.
++def create_bn_adapt_data_loader(config, bn_adapt_dataset):
++    pin_memory = config.execution_mode != ExecutionMode.CPU_ONLY
++
++    bn_adapt_loader = torch.utils.data.DataLoader(
++        bn_adapt_dataset,
++        batch_size=config.batch_size,
++        shuffle=False,
++        num_workers=config.workers,
++        pin_memory=pin_memory,
++        sampler=None,
++        drop_last=True,
++    )  # currently only support one GPU
++
++    return bn_adapt_loader
++
++
++# not used in the final version of AAAI
++def train_epoch_finetune(
++    train_loader,
++    model,
++    criterion,
++    criterion_fn,
++    optimizer,
++    compression_ctrl,
++    epoch,
++    config,
++    finetune_config,
++    train_iters=None,
++    log_training_info=True,
++    teacher_model=None,
++    scaler=None,
++    clip_grad_norm=None,
++):
++    batch_time = AverageMeter()
++    data_time = AverageMeter()
++    losses = AverageMeter()
++    compression_losses = AverageMeter()
++    criterion_losses = AverageMeter()
++    top1 = AverageMeter()
++    top5 = AverageMeter()
++
++    if train_iters is None:
++        train_iters = len(train_loader)
++
++    compression_scheduler = compression_ctrl.scheduler
++    casting = autocast if config.mixed_precision else NullContextManager
++
++    model.train()
++    compression_ctrl.multi_elasticity_handler.activate_subnet_for_config(finetune_config)
++
++    end = time.time()
++    for i, (input_, target) in enumerate(train_loader):
++        # measure data loading time
++        data_time.update(time.time() - end)
++
++        compression_scheduler._lr_scheduler.step()  # do not activate random subnet
++        optimizer.zero_grad(set_to_none=True)
++
++        input_ = input_.to(config.device)
++        target = target.to(config.device)
++
++        with casting():
++            output = model(input_).logits
++            if teacher_model:
++                criterion_loss = criterion_fn(output, target, criterion, input_, teacher_model)
++            else:
++                criterion_loss = criterion_fn(output, target, criterion)
++
++            compression_loss = compression_ctrl.loss()
++            loss = criterion_loss + compression_loss
++
++        losses.update(loss.item(), input_.size(0))
++        comp_loss_val = compression_loss.item() if isinstance(compression_loss, torch.Tensor) else compression_loss
++        compression_losses.update(comp_loss_val, input_.size(0))
++        criterion_losses.update(criterion_loss.item(), input_.size(0))
++
++        if scaler is not None:
++            scaler.scale(loss).backward()
++        else:
++            loss.backward()
++
++        if scaler is not None:
++            scaler.unscale_(optimizer)
++            if clip_grad_norm is not None:
++                # we should unscale the gradients of optimizer's assigned params if do gradient clipping
++                nn.utils.clip_grad_norm_(model.parameters(), clip_grad_norm)
++            scaler.step(optimizer)
++            scaler.update()
++        else:
++            optimizer.step()
++
++        # measure elapsed time
++        batch_time.update(time.time() - end)
++        end = time.time()
++
++        if i % config.print_freq == 0 and log_training_info:
++            logger.info(
++                "{rank}: "
++                "Epoch: [{0}][{1}/{2}] "
++                "Lr: {3:.3} "
++                "Time: {batch_time.val:.3f} ({batch_time.avg:.3f}) "
++                "Data: {data_time.val:.3f} ({data_time.avg:.3f}) "
++                "CE_loss: {ce_loss.val:.4f} ({ce_loss.avg:.4f}) "
++                "CR_loss: {cr_loss.val:.4f} ({cr_loss.avg:.4f}) "
++                "Loss: {loss.val:.4f} ({loss.avg:.4f}) "
++                "Acc@1: {top1.val:.3f} ({top1.avg:.3f}) "
++                "Acc@5: {top5.val:.3f} ({top5.avg:.3f})".format(
++                    epoch,
++                    i,
++                    len(train_loader),
++                    get_lr(optimizer),
++                    batch_time=batch_time,
++                    data_time=data_time,
++                    ce_loss=criterion_losses,
++                    cr_loss=compression_losses,
++                    loss=losses,
++                    top1=top1,
++                    top5=top5,
++                    rank="{}:".format(config.rank) if config.multiprocessing_distributed else "",
++                )
++            )
++
++        if i >= train_iters:
++            break
++
++
++def train_epoch_sandwich_rule(
++    train_loader,
++    model,
++    criterion,
++    criterion_fn,
++    optimizer,
++    compression_ctrl,
++    epoch,
++    config,
++    train_iters=None,
++    log_training_info=True,
++    sandwich_num=3,
++    teacher_model=None,
++    scaler=None,
++    clip_grad_norm=None,
++):
++    batch_time = AverageMeter()
++    data_time = AverageMeter()
++    losses = AverageMeter()
++    compression_losses = AverageMeter()
++    criterion_losses = AverageMeter()
++    top1 = AverageMeter()
++    top5 = AverageMeter()
++
++    if train_iters is None:
++        train_iters = len(train_loader)
++
++    compression_scheduler = compression_ctrl.scheduler
++    casting = autocast if config.mixed_precision else NullContextManager
++
++    model.train()
++
++    end = time.time()
++    for i, (input_, target) in enumerate(train_loader):
++        # measure data loading time
++        data_time.update(time.time() - end)
++
++        compression_scheduler._lr_scheduler.step()  # do not activate random subnet
++        optimizer.zero_grad(set_to_none=True)
++
++        input_ = input_.to(config.device)
++        target = target.to(config.device)
++
++        for arch_id in range(sandwich_num):
++            if arch_id == 0:
++                compression_ctrl.multi_elasticity_handler.activate_maximum_subnet()
++            elif arch_id == sandwich_num - 1:
++                compression_ctrl.multi_elasticity_handler.activate_minimum_subnet()
++            else:
++                compression_ctrl.step()  # random subnet
++
++            with casting():
++                output = model(input_).logits
++                if teacher_model:
++                    criterion_loss = criterion_fn(output, target, criterion, input_, teacher_model)
++                else:
++                    criterion_loss = criterion_fn(output, target, criterion)
++
++                compression_loss = compression_ctrl.loss()
++                loss = criterion_loss + compression_loss
++
++            if arch_id == sandwich_num - 2:  # use random subnet loss -> represent
++                losses.update(loss.item(), input_.size(0))
++                comp_loss_val = (
++                    compression_loss.item() if isinstance(compression_loss, torch.Tensor) else compression_loss
++                )
++                compression_losses.update(comp_loss_val, input_.size(0))
++                criterion_losses.update(criterion_loss.item(), input_.size(0))
++
++            if scaler is not None:
++                scaler.scale(loss).backward()
++            else:
++                loss.backward()
++
++        if scaler is not None:
++            scaler.unscale_(optimizer)
++            if clip_grad_norm is not None:
++                # we should unscale the gradients of optimizer's assigned params if do gradient clipping
++                nn.utils.clip_grad_norm_(model.parameters(), clip_grad_norm)
++            scaler.step(optimizer)
++            scaler.update()
++        else:
++            optimizer.step()
++
++        # measure elapsed time
++        batch_time.update(time.time() - end)
++        end = time.time()
++
++        if i % config.print_freq == 0 and log_training_info:
++            logger.info(
++                "{rank}: "
++                "Epoch: [{0}][{1}/{2}] "
++                "Lr: {3:.3} "
++                "Time: {batch_time.val:.3f} ({batch_time.avg:.3f}) "
++                "Data: {data_time.val:.3f} ({data_time.avg:.3f}) "
++                "CE_loss: {ce_loss.val:.4f} ({ce_loss.avg:.4f}) "
++                "CR_loss: {cr_loss.val:.4f} ({cr_loss.avg:.4f}) "
++                "Loss: {loss.val:.4f} ({loss.avg:.4f}) "
++                "Acc@1: {top1.val:.3f} ({top1.avg:.3f}) "
++                "Acc@5: {top5.val:.3f} ({top5.avg:.3f})".format(
++                    epoch,
++                    i,
++                    len(train_loader),
++                    get_lr(optimizer),
++                    batch_time=batch_time,
++                    data_time=data_time,
++                    ce_loss=criterion_losses,
++                    cr_loss=compression_losses,
++                    loss=losses,
++                    top1=top1,
++                    top5=top5,
++                    rank="{}:".format(config.rank) if config.multiprocessing_distributed else "",
++                )
++            )
++
++        if i >= train_iters:
++            break
++
++
+ def main(argv):
+     parser = get_nas_argument_parser()
+     args = parse_args(parser, argv)
+@@ -106,33 +427,79 @@ def main(argv):
+ 
+ # pylint:disable=too-many-branches,too-many-statements
+ def main_worker(current_gpu, config: SampleConfig):
+-    configure_device(current_gpu, config)
+-    config.mlflow = SafeMLFLow(config)
++    if config.execution_mode in (ExecutionMode.DISTRIBUTED, ExecutionMode.MULTIPROCESSING_DISTRIBUTED):
++        dist.init_process_group("nccl")
++        config.distributed = True
++        config.rank = dist.get_rank()
++        config.device = "cuda"
++        current_gpu = config.rank % torch.cuda.device_count()
++        config.current_gpu = current_gpu
++        config.ngpus_per_node = torch.cuda.device_count()
++        config.world_size = dist.get_world_size()
++        print(f"current gpu: {current_gpu}")
++        print(f"rank: {config.rank}")
++    else:
++        configure_device(current_gpu, config)
+     if is_main_process():
++        config.mlflow = SafeMLFLow(config)
+         configure_logging(logger, config)
+         print_args(config)
++    else:
++        config.tb = None
+ 
+     set_seed(config)
++    manual_seed(0)
++    if config.distributed:
++        seed = (config.rank) % 2**32
++        manual_seed(seed)
++        torch.cuda.set_device(config.current_gpu)
+ 
+     opt_config = config.get("optimizer", {})
+ 
+     # define loss function (criterion)
+-    if "label_smoothing" in opt_config:
+-        criterion = lambda pred, target: cross_entropy_with_label_smoothing(pred, target, opt_config.label_smoothing)
+-    else:
+-        criterion = nn.CrossEntropyLoss()
++    label_smoothing_value = config.nncf_config.get("optimizer", {}).get("label_smoothing", 0)
++    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing_value)
++    criterion = criterion.to(config.device)
+ 
+     model_name = config["model"]
+     train_criterion_fn = inception_criterion_fn if "inception" in model_name else default_criterion_fn
+ 
++    if config.get("teacher_model", None):
++
++        def criterion_with_kd_loss(
++            outputs: Any,
++            target: Any,
++            criterion: Any,
++            inputs: Any,
++            teacher_model,
++            distillation_weight=0.9,
++            distillation_temperature=2.0,
++        ):
++            def compute_distillation_loss(inputs, student_logits):
++                with torch.no_grad():
++                    teacher_logits = teacher_model(inputs).logits
++                return F.kl_div(
++                    input=F.log_softmax(student_logits / distillation_temperature, dim=-1),
++                    target=F.softmax(teacher_logits / distillation_temperature, dim=-1),
++                    reduction="batchmean",
++                ) * (distillation_temperature**2)
++
++            task_loss = criterion(outputs, target)
++            kd_loss = compute_distillation_loss(inputs, outputs)
++            return distillation_weight * task_loss + (1 - distillation_weight) * kd_loss
++
++        train_criterion_fn = criterion_with_kd_loss
++
+     nncf_config = config.nncf_config
+     pretrained = is_pretrained_model_requested(config)
+ 
+     # Data loading code
+     train_dataset, val_dataset = create_datasets(config)
+-    train_loader, _, val_loader, _ = create_data_loaders(config, train_dataset, val_dataset)
++    bn_adapt_dataset = torch.utils.data.Subset(train_dataset, torch.randperm(len(train_dataset)))
++    train_loader, train_sampler, val_loader, _ = create_data_loaders(config, train_dataset, val_dataset)
++    bn_adapt_loader = create_bn_adapt_data_loader(config, bn_adapt_dataset)
+ 
+-    bn_adapt_args = BNAdaptationInitArgs(data_loader=wrap_dataloader_for_init(train_loader), device=config.device)
++    bn_adapt_args = BNAdaptationInitArgs(data_loader=wrap_dataloader_for_init(bn_adapt_loader), device=config.device)
+     nncf_config.register_extra_structs([bn_adapt_args])
+     # create model
+     model = load_model(
+@@ -145,12 +512,32 @@ def main_worker(current_gpu, config: SampleConfig):
+ 
+     model.to(config.device)
+ 
++    teacher_model = None
++    if config.teacher_model:
++        teacher_model = load_model(
++            config.teacher_model,
++            pretrained=pretrained,
++            num_classes=config.get("num_classes", 1000),
++            model_params=config.get("model_params"),
++            weights_path=config.get("weights"),
++        )
++        teacher_model.to(config.device)
++        if config.distributed:
++            teacher_model = torch.nn.parallel.DistributedDataParallel(teacher_model, device_ids=[config.current_gpu])
++        teacher_model.eval()
++
+     if model_name == "efficient_net":
+         model.set_swish(memory_efficient=False)
+ 
+     # define optimizer
+     params_to_optimize = get_parameter_groups(model, config)
+-    optimizer, _ = make_optimizer(params_to_optimize, config)
++    optimizer, _ = make_optimizer(params_to_optimize, config, len(train_loader))
++
++    scaler = torch.cuda.amp.GradScaler() if config.mixed_precision else None
++    # finetune_config: not used in the final version of AAAI
++    finetune_config = None
++    if nncf_config.get("finetune_config", None):
++        finetune_config = convert_str_config(nncf_config["finetune_config"])
+ 
+     def train_epoch_fn(loader, model_, compression_ctrl, epoch, optimizer_):
+         train_epoch(
+@@ -166,14 +553,54 @@ def main_worker(current_gpu, config: SampleConfig):
+             log_training_info=True,
+         )
+ 
++    def train_epoch_sandwich_rule_fn(loader, model_, compression_ctrl, epoch, optimizer_):
++        train_epoch_sandwich_rule(
++            loader,
++            model_,
++            criterion,
++            train_criterion_fn,
++            optimizer_,
++            compression_ctrl,
++            epoch,
++            config,
++            scaler=scaler,
++            clip_grad_norm=config.get("clip_grad_norm", None),
++            teacher_model=teacher_model,
++        )
++
++    def train_epoch_finetune_fn(loader, model_, compression_ctrl, epoch, optimizer_):
++        train_epoch_finetune(
++            loader,
++            model_,
++            criterion,
++            train_criterion_fn,
++            optimizer_,
++            compression_ctrl,
++            epoch,
++            config,
++            finetune_config,
++            scaler=scaler,
++            clip_grad_norm=config.get("clip_grad_norm", None),
++            teacher_model=teacher_model,
++        )
++
+     def validate_model_fn(model_, loader):
+-        top1, top5, loss = validate(loader, model_, criterion, config, log_validation_info=False)
++        top1, top5, loss = validate(loader, model_, criterion, config, log_validation_info=True)
+         return top1, top5, loss
+ 
+     def validate_model_fn_top1(model_, loader_):
+         top1, _, _ = validate_model_fn(model_, loader_)
+         return top1
+ 
++    def create_distributed_fn(model_):
++        model_ = torch.nn.parallel.DistributedDataParallel(
++            model_, device_ids=[config.current_gpu], find_unused_parameters=True
++        )
++        # define optimizer
++        params_to_optimize = get_parameter_groups(model, config)
++        optimizer, _ = make_optimizer(params_to_optimize, config, len(train_loader))
++        return optimizer, model_
++
+     nncf_network = create_nncf_network(model, nncf_config)
+ 
+     resuming_checkpoint_path = config.resuming_checkpoint_path
+@@ -184,9 +611,26 @@ def main_worker(current_gpu, config: SampleConfig):
+             nncf_network, bn_adapt_args, resuming_checkpoint_path
+         )
+ 
++    if config.get("importance_mask_weight", None):
++        training_algorithm._training_ctrl.multi_elasticity_handler.width_handler.create_importance_mask_fn = partial(
++            generate_importance_mask_weight, resume_model=config["importance_mask_weight"], config=config
++        )
++
+     if "train" in config.mode:
++        # train fn
++        if nncf_config.get("finetune_config", None):
++            train_fn = train_epoch_finetune_fn
++            # load resume weight
++            print(f'start finetuning a single subnet from resume weight: {nncf_config["resume_weight"]}')
++            model_weights = torch.load(nncf_config["resume_weight"])
++            load_state(model, model_weights, is_resume=True)
++            print("Done")
++        elif nncf_config.get("bootstrapNAS", {}).get("training", {}).get("sandwich_rule", False):
++            train_fn = train_epoch_sandwich_rule_fn
++        else:
++            train_fn = train_epoch_fn
+         nncf_network, elasticity_ctrl = training_algorithm.run(
+-            train_epoch_fn,
++            train_fn,
+             train_loader,
+             validate_model_fn,
+             val_loader,
+@@ -194,8 +638,15 @@ def main_worker(current_gpu, config: SampleConfig):
+             config.checkpoint_save_dir,
+             config.tb,
+             config.train_steps,
++            config,
++            train_sampler,
++            create_distributed_fn,
++            finetune_config,
+         )
+ 
++        if nncf_config.get("finetune_config", None):
++            return
++
+         if resuming_checkpoint_path is None:
+             search_algo = SearchAlgorithm.from_config(nncf_network, elasticity_ctrl, nncf_config)
+         else:
+@@ -211,29 +662,6 @@ def main_worker(current_gpu, config: SampleConfig):
+         logger.info("Performance metrics: {performance_metrics}".format(performance_metrics=performance_metrics))
+         search_algo.visualize_search_progression()
+ 
+-        # Maximal subnet
+-        elasticity_ctrl.multi_elasticity_handler.activate_maximum_subnet()
+-        search_algo.bn_adaptation.run(nncf_network)
+-        top1_acc = validate_model_fn_top1(nncf_network, val_loader)
+-        logger.info(
+-            "Maximal subnet Top1 acc: {top1_acc}, Macs: {macs}".format(
+-                top1_acc=top1_acc,
+-                macs=elasticity_ctrl.multi_elasticity_handler.count_flops_and_weights_for_active_subnet()[0] / 2000000,
+-            )
+-        )
+-
+-        # Best found subnet
+-        elasticity_ctrl.multi_elasticity_handler.activate_subnet_for_config(best_config)
+-        search_algo.bn_adaptation.run(nncf_network)
+-        top1_acc = validate_model_fn_top1(nncf_network, val_loader)
+-        logger.info(
+-            "Best found subnet Top1 acc: {top1_acc}, Macs: {macs}".format(
+-                top1_acc=top1_acc,
+-                macs=elasticity_ctrl.multi_elasticity_handler.count_flops_and_weights_for_active_subnet()[0] / 2000000,
+-            )
+-        )
+-        elasticity_ctrl.export_model(osp.join(config.log_dir, "best_subnet.onnx"))
+-
+     if "test" in config.mode:
+         validate(val_loader, nncf_network, criterion, config)
+ 
+diff --git a/examples/experimental/torch/classification/bootstrap_nas_search.py b/examples/experimental/torch/classification/bootstrap_nas_search.py
+index 228641ff..767e6699 100644
+--- a/examples/experimental/torch/classification/bootstrap_nas_search.py
++++ b/examples/experimental/torch/classification/bootstrap_nas_search.py
+@@ -17,6 +17,7 @@ from shutil import copyfile
+ import torch
+ from torch import nn
+ 
++from examples.experimental.torch.classification.bootstrap_nas import create_bn_adapt_data_loader
+ from examples.common.paths import configure_paths
+ from examples.common.sample_config import SampleConfig
+ from examples.common.sample_config import create_sample_config
+@@ -112,9 +113,12 @@ def main_worker(current_gpu, config: SampleConfig):
+ 
+     # Data loading code
+     train_dataset, val_dataset = create_datasets(config)
+-    train_loader, _, val_loader, _ = create_data_loaders(config, train_dataset, val_dataset)
++    # Only for running experiments with fixed set of subnets in batchnorm adapt - bootstrap_nas.py
++    bn_adapt_dataset = torch.utils.data.Subset(train_dataset, torch.randperm(len(train_dataset)))
++    _, _, val_loader, _ = create_data_loaders(config, train_dataset, val_dataset)
++    bn_adapt_loader = create_bn_adapt_data_loader(config, bn_adapt_dataset)
+ 
+-    bn_adapt_args = BNAdaptationInitArgs(data_loader=wrap_dataloader_for_init(train_loader), device=config.device)
++    bn_adapt_args = BNAdaptationInitArgs(data_loader=wrap_dataloader_for_init(bn_adapt_loader), device=config.device)
+     nncf_config.register_extra_structs([bn_adapt_args])
+     # create model
+     model = load_model(
+diff --git a/examples/torch/common/execution.py b/examples/torch/common/execution.py
+index 26a3275d..c871cc9c 100644
+--- a/examples/torch/common/execution.py
++++ b/examples/torch/common/execution.py
+@@ -111,7 +111,10 @@ def start_worker(main_worker, config: SampleConfig):
+         config.world_size = config.ngpus_per_node * config.world_size
+         # Use torch.multiprocessing.spawn to launch distributed processes: the
+         # main_worker process function
+-        mp.spawn(main_worker, nprocs=config.ngpus_per_node, args=(config,))
++        # mp.spawn(main_worker, nprocs=config.ngpus_per_node, args=(config,))
++        main_worker(
++            current_gpu=config.gpu_id, config=config
++        )  # use torchrun instead of mp.spawn (for pickle collate_fn)
+ 
+ 
+ def set_seed(config):
+diff --git a/examples/torch/common/model_loader.py b/examples/torch/common/model_loader.py
+index 08f15b06..2753db1a 100644
+--- a/examples/torch/common/model_loader.py
++++ b/examples/torch/common/model_loader.py
+@@ -49,6 +49,12 @@ def load_model(
+         )
+     elif model == "mobilenet_v2_32x32":
+         load_model_fn = partial(MobileNetV2For32x32, num_classes=100)
++    elif model.startswith("transformers"):
++        from transformers import AutoModelForImageClassification
++
++        model_name = model[len("transformers_") :]
++        loaded_model = AutoModelForImageClassification.from_pretrained(model_name)
++        return loaded_model
+     else:
+         raise Exception("Undefined model name")
+     loaded_model = safe_thread_call(load_model_fn)
+diff --git a/examples/torch/common/optimizer.py b/examples/torch/common/optimizer.py
+index 78d9d79c..78adb912 100644
+--- a/examples/torch/common/optimizer.py
++++ b/examples/torch/common/optimizer.py
+@@ -10,9 +10,12 @@
+ # limitations under the License.
+ 
+ import re
++from typing import List, Optional, Tuple
+ 
++import torch
+ from torch.optim import SGD
+ from torch.optim import Adam
++from torch.optim import AdamW
+ from torch.optim.lr_scheduler import ExponentialLR
+ from torch.optim.lr_scheduler import LambdaLR
+ from torch.optim.lr_scheduler import MultiStepLR
+@@ -20,38 +23,98 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
+ from torch.optim.lr_scheduler import StepLR
+ 
+ 
++def set_weight_decay(
++    model: torch.nn.Module,
++    weight_decay: float,
++    norm_weight_decay: Optional[float] = None,
++    norm_classes: Optional[List[type]] = None,
++    custom_keys_weight_decay: Optional[List[Tuple[str, float]]] = None,
++):
++    # copy from https://github.com/pytorch/vision/blob/main/references/classification/utils.py
++    if not norm_classes:
++        norm_classes = [
++            torch.nn.modules.batchnorm._BatchNorm,
++            torch.nn.LayerNorm,
++            torch.nn.GroupNorm,
++            torch.nn.modules.instancenorm._InstanceNorm,
++            torch.nn.LocalResponseNorm,
++        ]
++    norm_classes = tuple(norm_classes)
++
++    params = {
++        "other": [],
++        "norm": [],
++    }
++    params_weight_decay = {
++        "other": weight_decay,
++        "norm": norm_weight_decay,
++    }
++    custom_keys = []
++    if custom_keys_weight_decay is not None:
++        for key, weight_decay in custom_keys_weight_decay:
++            params[key] = []
++            params_weight_decay[key] = weight_decay
++            custom_keys.append(key)
++
++    def _add_params(module, prefix=""):
++        for name, p in module.named_parameters(recurse=False):
++            if not p.requires_grad:
++                continue
++            is_custom_key = False
++            for key in custom_keys:
++                target_name = f"{prefix}.{name}" if prefix != "" and "." in key else name
++                if key == target_name:
++                    params[key].append(p)
++                    is_custom_key = True
++                    break
++            if not is_custom_key:
++                if norm_weight_decay is not None and isinstance(module, norm_classes):
++                    params["norm"].append(p)
++                else:
++                    params["other"].append(p)
++
++        for child_name, child_module in module.named_children():
++            child_prefix = f"{prefix}.{child_name}" if prefix != "" else child_name
++            _add_params(child_module, prefix=child_prefix)
++
++    _add_params(model)
++
++    param_groups = []
++    for key in params:
++        if len(params[key]) > 0:
++            param_groups.append({"params": params[key], "weight_decay": params_weight_decay[key]})
++    return param_groups
++
++
+ def get_parameter_groups(model, config):
+     optim_config = config.get("optimizer", {})
+-    base_lr = optim_config.get("base_lr", 1e-4)
+     weight_decay = optim_config.get("weight_decay", get_default_weight_decay(config))
+ 
+-    if "parameter_groups" not in optim_config:
+-        return [{"lr": base_lr, "weight_decay": weight_decay, "params": model.parameters()}]
+-
+-    param_groups = optim_config.parameter_groups
+-    for param_name, param in model.named_parameters():
+-        group = None
+-        found = False
+-        for group in param_groups:
+-            # find first matched group for a given param
+-            if re.search(group.get("re", ""), param_name):
+-                found = True
+-                break
+-        if found:
+-            group.setdefault("params", []).append(param)
+-    return param_groups
+-
+-
+-def make_optimizer(params_to_optimize, config):
++    custom_keys_weight_decay = []
++    if optim_config.get("bias_weight_decay", None):
++        custom_keys_weight_decay.append(("bias", optim_config.bias_weight_decay))
++    if optim_config.get("transformer_embedding_decay", None):
++        for key in ["class_token", "position_embedding", "relative_position_bias_table"]:
++            custom_keys_weight_decay.append((key, optim_config.transformer_embedding_decay))
++    parameters = set_weight_decay(
++        model,
++        weight_decay,
++        norm_weight_decay=optim_config.get("norm_weight_decay", None),
++        custom_keys_weight_decay=custom_keys_weight_decay if len(custom_keys_weight_decay) > 0 else None,
++    )
++    return parameters
++
++
++def make_optimizer(params_to_optimize, config, train_iters):
+     optim_config = config.get("optimizer", {})
+ 
+     optim_type = optim_config.get("type", "adam").lower()
+-    optim_params = optim_config.get("optimizer_params", {})
+-    if optim_type == "adam":
+-        optim = Adam(params_to_optimize, **optim_params)
+-    elif optim_type == "sgd":
+-        optim_params = optim_config.get("optimizer_params", {"momentum": 0.9})
+-        optim = SGD(params_to_optimize, **optim_params)
++    if optim_type == "adamw":
++        optim = AdamW(
++            params_to_optimize,
++            lr=optim_config.get("base_lr", 1e-4),
++            weight_decay=optim_config.get("weight_decay", 1e-4),
++        )
+     else:
+         raise KeyError("Unknown optimizer type: {}".format(optim_type))
+ 
+@@ -59,7 +122,25 @@ def make_optimizer(params_to_optimize, config):
+     scheduler_params = optim_config.get("schedule_params", optim_config.get("scheduler_params", {}))
+ 
+     gamma = optim_config.get("gamma", 0.1)
+-    if scheduler_type == "multistep":
++    if scheduler_type == "cosineannealinglr":
++        main_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
++            optim, T_max=scheduler_params["T_max"] * train_iters, eta_min=scheduler_params["eta_min"] * train_iters
++        )
++        warmup_schedule_params = optim_config.get("warmup_schedule_params", None)
++        if warmup_schedule_params:
++            warmup_lr_scheduler = torch.optim.lr_scheduler.LinearLR(
++                optim,
++                start_factor=warmup_schedule_params.get("lr_warmup_decay", 0.01),
++                total_iters=warmup_schedule_params.get("lr_warmup_epochs", 1) * train_iters,
++            )
++            scheduler = torch.optim.lr_scheduler.SequentialLR(
++                optim,
++                schedulers=[warmup_lr_scheduler, main_lr_scheduler],
++                milestones=[warmup_schedule_params.lr_warmup_epochs * train_iters],
++            )
++        else:
++            scheduler = main_lr_scheduler
++    elif scheduler_type == "multistep":
+         scheduler = MultiStepLR(optim, optim_config.get("steps"), gamma=gamma, **scheduler_params)
+     elif scheduler_type == "step":
+         scheduler = StepLR(optim, step_size=optim_config.get("step", 30), gamma=gamma, **scheduler_params)
+diff --git a/nncf/common/graph/layer_attributes.py b/nncf/common/graph/layer_attributes.py
+index ce934c23..5caf1f39 100644
+--- a/nncf/common/graph/layer_attributes.py
++++ b/nncf/common/graph/layer_attributes.py
+@@ -131,6 +131,22 @@ class LinearLayerAttributes(WeightedLayerAttributes):
+         return 0
+ 
+ 
++class EmbeddingLayerAttributes(WeightedLayerAttributes):
++    def __init__(self,
++                 weight_requires_grad: bool,
++                 num_embeddings: int,
++                 embedding_dim: int):
++        super().__init__(weight_requires_grad)
++        self.num_embeddings = num_embeddings
++        self.embedding_dim = embedding_dim
++
++    def get_weight_shape(self) -> List[int]:
++        return [self.num_embeddings, self.embedding_dim]
++
++    def get_target_dim_for_compression(self) -> int:
++        return 1
++
++
+ class ConvolutionLayerAttributes(WeightedLayerAttributes):
+     def __init__(
+         self,
+diff --git a/nncf/common/pruning/operations.py b/nncf/common/pruning/operations.py
+index 4caadd69..4309972a 100644
+--- a/nncf/common/pruning/operations.py
++++ b/nncf/common/pruning/operations.py
+@@ -158,6 +158,17 @@ class LinearPruningOp(BasePruningOp):
+         output_mask = node.attributes.get("output_mask", None)
+         node.attributes["output_mask"] = output_mask
+ 
++class EmbeddingPruningOp(BasePruningOp):
++    @classmethod
++    def accept_pruned_input(cls, node: NNCFNode) -> bool:
++        return False
++
++    @classmethod
++    def mask_propagation(cls, node: NNCFNode, graph: NNCFGraph,
++                         tensor_processor: Type[NNCFPruningBaseTensorProcessor]) -> None:
++        output_mask = node.attributes.get('output_mask', None)
++        node.attributes['output_mask'] = output_mask
++
+ 
+ class BatchNormPruningOp(BasePruningOp):
+     @classmethod
+diff --git a/nncf/common/pruning/shape_pruning_processor.py b/nncf/common/pruning/shape_pruning_processor.py
+index 9bb099cb..b86ada2b 100644
+--- a/nncf/common/pruning/shape_pruning_processor.py
++++ b/nncf/common/pruning/shape_pruning_processor.py
+@@ -202,7 +202,10 @@ class ShapePruningProcessor:
+             next_nodes_cluster = next_nodes_cluster - cluster_nodes
+             next_nodes[cluster.id] = []
+             for next_node in next_nodes_cluster:
+-                sparse_multiplier = self._get_next_node_sparse_multiplier(graph, next_node, cluster)
++                try:
++                    sparse_multiplier = self._get_next_node_sparse_multiplier(graph, next_node, cluster)
++                except:
++                    sparse_multiplier = 1
+                 next_nodes[cluster.id].append(
+                     {"node_name": next_node.node_name, "sparse_multiplier": sparse_multiplier}
+                 )
+diff --git a/nncf/common/pruning/utils.py b/nncf/common/pruning/utils.py
+index fcded91c..ad6a564d 100644
+--- a/nncf/common/pruning/utils.py
++++ b/nncf/common/pruning/utils.py
+@@ -20,6 +20,7 @@ from nncf.common.graph import NNCFGraph
+ from nncf.common.graph import NNCFNode
+ from nncf.common.graph import NNCFNodeName
+ from nncf.common.graph.layer_attributes import ConvolutionLayerAttributes
++from nncf.common.graph.layer_attributes import EmbeddingLayerAttributes
+ from nncf.common.graph.layer_attributes import LinearLayerAttributes
+ from nncf.common.tensor import NNCFTensor
+ from nncf.common.utils.registry import Registry
+@@ -199,7 +200,9 @@ def get_prunable_layers_in_out_channels(graph: NNCFGraph) -> Tuple[Dict[NNCFNode
+     """
+     in_channels, out_channels = {}, {}
+     for node in graph.get_all_nodes():
+-        if isinstance(node.layer_attributes, (ConvolutionLayerAttributes, LinearLayerAttributes)):
++        if isinstance(
++            node.layer_attributes, (ConvolutionLayerAttributes, LinearLayerAttributes, EmbeddingLayerAttributes)
++        ):
+             name = node.node_name
+             if name in in_channels and name in out_channels:
+                 continue
+@@ -385,6 +388,8 @@ def get_input_channels(node: NNCFNode) -> int:
+         return layer_attrs.in_channels
+     if isinstance(layer_attrs, LinearLayerAttributes):
+         return layer_attrs.in_features
++    if isinstance(layer_attrs, EmbeddingLayerAttributes):
++        return layer_attrs.num_embeddings
+     raise RuntimeError(f"Can't get count of input channels from node {node}")
+ 
+ 
+@@ -400,6 +405,8 @@ def get_output_channels(node: NNCFNode) -> int:
+         return layer_attrs.out_channels
+     if isinstance(layer_attrs, LinearLayerAttributes):
+         return layer_attrs.out_features
++    if isinstance(layer_attrs, EmbeddingLayerAttributes):
++        return layer_attrs.embedding_dim
+     raise RuntimeError(f"Can't get count of output channels from node {node}")
+ 
+ 
+diff --git a/nncf/config/schemata/experimental_schema.py b/nncf/config/schemata/experimental_schema.py
+index 3a807d87..e3a59469 100644
+--- a/nncf/config/schemata/experimental_schema.py
++++ b/nncf/config/schemata/experimental_schema.py
+@@ -13,6 +13,7 @@ import copy
+ 
+ from nncf.config.definitions import BOOTSTRAP_NAS_ALGO_NAME_IN_CONFIG
+ from nncf.config.definitions import EXPERIMENTAL_QUANTIZATION_ALGO_NAME_IN_CONFIG
++from nncf.config.definitions import KNOWLEDGE_DISTILLATION_ALGO_NAME_IN_CONFIG
+ from nncf.config.definitions import MOVEMENT_SPARSITY_ALGO_NAME_IN_CONFIG
+ from nncf.config.schemata.algo.quantization import QUANTIZATION_SCHEMA
+ from nncf.config.schemata.basic import ARRAY_OF_NUMBERS
+@@ -20,6 +21,7 @@ from nncf.config.schemata.basic import ARRAY_OF_STRINGS
+ from nncf.config.schemata.basic import BOOLEAN
+ from nncf.config.schemata.basic import NUMBER
+ from nncf.config.schemata.basic import STRING
++from nncf.config.schemata.basic import make_object_or_array_of_objects_schema
+ from nncf.config.schemata.basic import make_string_or_array_of_strings_schema
+ from nncf.config.schemata.basic import with_attributes
+ from nncf.config.schemata.common.compression import BASIC_COMPRESSION_ALGO_SCHEMA
+@@ -268,7 +270,7 @@ BOOTSTRAP_NAS_TRAINING_SCHEMA = {
+ 
+ SEARCH_ALGORITHMS_SCHEMA = {
+     "type": "string",
+-    "enum": ["NSGA2"],
++    "enum": ["NSGA2", "RNSGA2"],
+ }
+ 
+ BOOTSTRAP_NAS_SEARCH_SCHEMA = {
+@@ -281,9 +283,20 @@ BOOTSTRAP_NAS_SEARCH_SCHEMA = {
+         "num_evals": with_attributes(
+             NUMBER, description="Defines the number of evaluations that will be used by the search algorithm."
+         ),
++        "num_constraints":
++        with_attributes(NUMBER,
++                        description="Number of constraints in search problem."),
+         "population": with_attributes(
+             NUMBER, description="Defines the population size when using an evolutionary search algorithm."
+         ),
++        "crossover_prob": with_attributes(NUMBER,
++                        description="Crossover probability used by a genetic algorithm."),
++        "crossover_eta": with_attributes(NUMBER,
++                        description="Crossover eta."),
++        "mutation_eta": with_attributes(NUMBER,
++                        description="Mutation eta for genetic algorithm."),
++        "mutation_prob": with_attributes(NUMBER,
++                        description="Mutation probability for genetic algorithm."),
+         "acc_delta": with_attributes(
+             NUMBER,
+             description="Defines the absolute difference in accuracy that is tolerated "
+@@ -294,6 +307,20 @@ BOOTSTRAP_NAS_SEARCH_SCHEMA = {
+             description="Defines the reference accuracy from the pre-trained model used "
+             "to generate the super-network.",
+         ),
++        "aspiration_points":
++        with_attributes(ARRAY_OF_NUMBERS,
++                        description="Information to indicate the preferred parts of the Pareto front"),
++        "epsilon":
++        with_attributes(NUMBER,
++                        description="epsilon distance of surviving solutions for RNSGA-II."),
++        "weights":
++        with_attributes(NUMBER,
++                        description="weights used by RNSGA-II."),
++        "extreme_points_as_ref_points": with_attributes(BOOLEAN,
++                                               description="Find extreme points and use them as aspiration points."),
++        "compression": make_object_or_array_of_objects_schema(
++            {"oneOf": [{"$ref": f"#/$defs/{KNOWLEDGE_DISTILLATION_ALGO_NAME_IN_CONFIG}"}]}
++        ),
+     },
+     "additionalProperties": False,
+ }
+diff --git a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_depth.py b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_depth.py
+index 739ba4ce..e2b888cc 100644
+--- a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_depth.py
++++ b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_depth.py
+@@ -54,6 +54,7 @@ class ElasticDepthHandler(SingleElasticityHandler):
+         skipped_blocks: BuildingBlocks,
+         skip_dependencies: GroupedBlockIDs,
+         node_names_per_block: Dict[int, List[NNCFNodeName]],
++        fixed_skipped_blocks_indexes: list[int],
+     ):
+         """
+         Constructor
+@@ -69,6 +70,9 @@ class ElasticDepthHandler(SingleElasticityHandler):
+         self._tracing_context = self._target_model.nncf.get_tracing_context()  # type: TracingContext
+         self._skipped_blocks = skipped_blocks
+         self._skip_dependencies = skip_dependencies
++        self._fixed_skipped_blocks_indexes = (
++            [] if fixed_skipped_blocks_indexes is None else fixed_skipped_blocks_indexes
++        )
+         self._node_names_per_block = node_names_per_block
+         self._depth_indicator = 1
+         self._is_search_space_obsolete = True
+@@ -121,17 +125,22 @@ class ElasticDepthHandler(SingleElasticityHandler):
+         """
+         if not self._is_search_space_obsolete:
+             return self._cached_search_space
+-        range_block_ids = range(0, len(self._skipped_blocks))
++        skip_blocks_len = 0 if self._skipped_blocks is None else len(self._skipped_blocks)
++        range_block_ids = list(set(range(0, skip_blocks_len)) - set(self._fixed_skipped_blocks_indexes))
+         # TODO(nlyalyus): can be a huge search space. no need to iterate and filter all of them. (ticket 69746)
+         possible_depth_configs = [list(combinations(range_block_ids, i + 1)) for i in range_block_ids]
+         possible_depth_configs = [y for x in possible_depth_configs for y in x]
++        if self._fixed_skipped_blocks_indexes:
++            possible_depth_configs = [
++                tuple(list(y) + (self._fixed_skipped_blocks_indexes)) for y in possible_depth_configs
++            ]
+         valid_depth_configs = []
+         for d_sample in possible_depth_configs:
+             if list(d_sample) == self._remove_inconsistent_blocks(list(d_sample)):
+                 valid_depth_configs.append(list(d_sample))
+         self._cached_search_space = valid_depth_configs
+         self._is_search_space_obsolete = False
+-        if [] not in valid_depth_configs:
++        if self._fixed_skipped_blocks_indexes not in valid_depth_configs:
+             valid_depth_configs.append([])
+         return valid_depth_configs
+ 
+@@ -153,7 +162,7 @@ class ElasticDepthHandler(SingleElasticityHandler):
+         config = []
+         for i in range(0, num_blocks):
+             is_skipped = bool(random.getrandbits(1))  # random.randint(0, 1)
+-            if is_skipped:
++            if is_skipped or (i in self._fixed_skipped_blocks_indexes):
+                 config.append(i)
+         return config
+ 
+@@ -173,7 +182,7 @@ class ElasticDepthHandler(SingleElasticityHandler):
+ 
+         :return: list of blocks' indexes to skip
+         """
+-        return []
++        return self._fixed_skipped_blocks_indexes
+ 
+     def activate_supernet(self) -> None:
+         """
+@@ -234,6 +243,8 @@ class ElasticDepthHandler(SingleElasticityHandler):
+         return self._remove_blocks_skipped_non_progressively(config)
+ 
+     def _remove_blocks_skipped_non_progressively(self, config: ElasticDepthConfig) -> ElasticDepthConfig:
++        if self._skip_dependencies is None:
++            return config
+         assert self._skip_dependencies is not None, "Please include depth dependencies in conf. Pending automation."
+         block_indexes_to_remove = []
+         for block_index in config:
+@@ -283,6 +294,7 @@ class EDParamsStateNames:
+     MIN_BLOCK_SIZE = "min_block_size"
+     HW_FUSED_OPS = "hw_fused_ops"
+     SKIPPED_BLOCKS = "skipped_blocks"
++    FIXED_SKIPPED_BLOCKS = "fixed_skipped_blocks"
+ 
+ 
+ @ELASTICITY_PARAMS.register(ElasticityDim.DEPTH)
+@@ -295,6 +307,7 @@ class ElasticDepthParams(BaseElasticityParams):
+         min_block_size: int,
+         hw_fused_ops: bool = True,
+         skipped_blocks: Optional[List[List[NNCFNodeName]]] = None,
++        fixed_skipped_blocks: Optional[List[List[NNCFNodeName]]] = None,
+     ):
+         """
+         Constructor
+@@ -312,6 +325,7 @@ class ElasticDepthParams(BaseElasticityParams):
+         self.min_block_size = min_block_size
+         self.hw_fused_ops = hw_fused_ops
+         self.skipped_blocks = skipped_blocks
++        self.fixed_skipped_blocks = fixed_skipped_blocks
+ 
+     @classmethod
+     def from_config(cls, config: Dict[str, Any]) -> "ElasticDepthParams":
+@@ -323,6 +337,7 @@ class ElasticDepthParams(BaseElasticityParams):
+             cls._state_names.MIN_BLOCK_SIZE: config.get(cls._state_names.MIN_BLOCK_SIZE, 5),
+             cls._state_names.HW_FUSED_OPS: config.get(cls._state_names.HW_FUSED_OPS, True),
+             cls._state_names.SKIPPED_BLOCKS: config.get(cls._state_names.SKIPPED_BLOCKS),
++            cls._state_names.FIXED_SKIPPED_BLOCKS: config.get(cls._state_names.FIXED_SKIPPED_BLOCKS),
+         }
+         return cls(**kwargs)
+ 
+@@ -346,6 +361,7 @@ class ElasticDepthParams(BaseElasticityParams):
+             self._state_names.MIN_BLOCK_SIZE: self.min_block_size,
+             self._state_names.HW_FUSED_OPS: self.hw_fused_ops,
+             self._state_names.SKIPPED_BLOCKS: self.skipped_blocks,
++            self._state_names.FIXED_SKIPPED_BLOCKS: self.fixed_skipped_blocks,
+         }
+ 
+     def __eq__(self, other: "ElasticDepthParams") -> bool:
+@@ -385,10 +401,20 @@ class ElasticDepthBuilder(SingleElasticityBuilder):
+         super().__init__(ignored_scopes, target_scopes)
+         self._params = params
+         self._skipped_blocks = None  # type: Optional[ExtendedBuildingBlocks]
++        self._fixed_skipped_blocks_indexes = None
+         self._skip_dependencies = None  # type: Optional[GroupedBlockIDs]
+         if self._params.skipped_blocks is not None:
+             self._skipped_blocks = [BuildingBlock(*b) for b in self._params.skipped_blocks]
+             self._skip_dependencies = get_group_of_dependent_blocks(self._skipped_blocks)
++        if self._params.fixed_skipped_blocks is not None:
++            skipped_blocks_len = 0 if self._skipped_blocks is None else len(self._skipped_blocks)
++            self._fixed_skipped_blocks_indexes = list(
++                range(skipped_blocks_len, skipped_blocks_len + len(self._params.fixed_skipped_blocks))
++            )
++            if self._skipped_blocks is None:
++                self._skipped_blocks = [BuildingBlock(*b) for b in self._params.fixed_skipped_blocks]
++            else:
++                self._skipped_blocks.extend([BuildingBlock(*b) for b in self._params.fixed_skipped_blocks])
+ 
+     def build(self, target_model: NNCFNetwork) -> ElasticDepthHandler:
+         """
+@@ -418,7 +444,13 @@ class ElasticDepthBuilder(SingleElasticityBuilder):
+         tracing_context.set_elastic_blocks(self._skipped_blocks)
+         node_names_per_block = self._get_node_names_per_block(target_model, self._skipped_blocks)
+ 
+-        return ElasticDepthHandler(target_model, self._skipped_blocks, self._skip_dependencies, node_names_per_block)
++        return ElasticDepthHandler(
++            target_model,
++            self._skipped_blocks,
++            self._skip_dependencies,
++            node_names_per_block,
++            self._fixed_skipped_blocks_indexes,
++        )
+ 
+     def load_state(self, state: Dict[str, Any]) -> None:
+         """
+diff --git a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_width.py b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_width.py
+index dfb9f49e..4d52ae89 100644
+--- a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_width.py
++++ b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elastic_width.py
+@@ -22,6 +22,7 @@ from torch import nn
+ from nncf.common.graph import BaseLayerAttributes
+ from nncf.common.graph import NNCFNodeName
+ from nncf.common.graph.layer_attributes import ConvolutionLayerAttributes
++from nncf.common.graph.layer_attributes import EmbeddingLayerAttributes
+ from nncf.common.graph.layer_attributes import GenericWeightedLayerAttributes
+ from nncf.common.graph.layer_attributes import LinearLayerAttributes
+ from nncf.common.graph.transformations.commands import TargetType
+@@ -50,11 +51,13 @@ from nncf.torch.graph.graph import PTNNCFGraph
+ from nncf.torch.graph.operator_metatypes import PTDepthwiseConv2dSubtype
+ from nncf.torch.graph.operator_metatypes import PTModuleBatchNormMetatype
+ from nncf.torch.graph.operator_metatypes import PTModuleConv2dMetatype
++from nncf.torch.graph.operator_metatypes import PTModuleEmbeddingMetatype
+ from nncf.torch.graph.operator_metatypes import PTModuleLayerNormMetatype
+ from nncf.torch.graph.operator_metatypes import PTModuleLinearMetatype
+ from nncf.torch.graph.transformations.commands import PTInsertionCommand
+ from nncf.torch.graph.transformations.commands import PTTargetPoint
+ from nncf.torch.layers import NNCFConv2d
++from nncf.torch.layers import NNCFEmbedding
+ from nncf.torch.layers import NNCFLinear
+ from nncf.torch.module_operations import UpdateBatchNormParams
+ from nncf.torch.module_operations import UpdateLayerNormParams
+@@ -118,12 +121,12 @@ class ElasticWidthOp:
+ 
+         :param width: number of channels
+         """
+-        if width is None or width > self._max_width or width < 1:
+-            raise AttributeError(
+-                "Invalid width={} in scope={}.\nIt should be within the range: [1, {}]".format(
+-                    width, self._node_name, self._max_width
+-                )
+-            )
++        # if width is None or width > self._max_width or width < 1:
++        #     raise AttributeError(
++        #         "Invalid width={} in scope={}.\nIt should be within the range: [1, {}]".format(
++        #             width, self._node_name, self._max_width
++        #         )
++        #     )
+ 
+         self._active_width = width
+ 
+@@ -262,8 +265,8 @@ class ElasticOutputWidthOp(ElasticWidthOp):
+                 raise RuntimeError(
+                     f"Width list for {node_name} contains invalid values: {fixed_width_list}, {max_width}"
+                 )
+-            if fixed_width_list[0] != max_width:
+-                raise RuntimeError(f"Max width for {node_name} is not aligned with pre-trained model")
++            # if fixed_width_list[0] != max_width:
++            #     raise RuntimeError(f"Max width for {node_name} is not aligned with pre-trained model")
+             self._width_list = fixed_width_list
+         else:
+             self._width_list = self._generate_width_list(self._max_width, params)
+@@ -291,11 +294,11 @@ class ElasticOutputWidthOp(ElasticWidthOp):
+ 
+         :param width: number of output channels
+         """
+-        if width not in self.width_list and width != self.max_width:
+-            raise ValueError(
+-                f"Invalid number of output channels to set: {width} in scope={self._node_name}. "
+-                f"Should be a number in {self.width_list}"
+-            )
++        # if width not in self.width_list and width != self.max_width:
++        #     raise ValueError(
++        #         f"Invalid number of output channels to set: {width} in scope={self._node_name}. "
++        #         f"Should be a number in {self.width_list}"
++        #     )
+         super().set_active_width(width)
+ 
+     @staticmethod
+@@ -385,6 +388,11 @@ class ElasticInputWidthLinearOp(ElasticWidthOp, nn.Module):
+         """
+         return weight[:, : self._active_width]
+ 
++    def get_clean_subnet_weight(self, node_module) -> None:
++        new_weight = self(node_module.weight)
++        node_module.weight = nn.Parameter(new_weight)
++        node_module.in_features = self._active_width
++
+ 
+ class ElasticInputWidthConvOp(ElasticWidthOp, nn.Module):
+     """
+@@ -447,6 +455,14 @@ class ElasticInputWidthLayerNormOp(ElasticWidthOp, nn.Module):
+         assert len(normalized_shape) == 1, "Currently only 1-dimensional shape is supported."
+         return [weight[: self._active_width], bias[: self._active_width], (self._active_width,)]
+ 
++    def get_clean_subnet_weight(self, node_module) -> None:
++        new_weight, new_bias, new_normalized_shape = self.forward(
++            node_module.weight, node_module.bias, node_module.normalized_shape
++        )
++        node_module.weight = nn.Parameter(new_weight)
++        node_module.bias = nn.Parameter(new_bias)
++        node_module.normalized_shape = new_normalized_shape
++
+ 
+ class ElasticOutputWidthConv2DOp(ElasticOutputWidthOp, nn.Module):
+     """
+@@ -484,6 +500,31 @@ class ElasticOutputWidthLinearOp(ElasticOutputWidthOp, nn.Module):
+         new_bias = None if bias is None else bias[: self._active_width]
+         return [weight[: self._active_width, :], new_bias]
+ 
++    def get_clean_subnet_weight(self, node_module) -> None:
++        new_weight, new_bias = self(node_module.weight, node_module.bias)
++        node_module.weight = nn.Parameter(new_weight)
++        node_module.bias = nn.Parameter(new_bias)
++        node_module.out_features = self._active_width
++
++
++class ElasticOutputWidthEmbeddingOp(ElasticOutputWidthOp, nn.Module):
++    """
++    Introduces elastic output width for embedding layer.
++    """
++
++    def forward(self, weight: torch.Tensor) -> torch.Tensor:
++        """
++        Trims embedding layer's parameters according to active number of output channels.
++        :param weight: weight tensor to be trimmed
++        :return: trimmed embedding parameters
++        """
++        return weight[:, : self._active_width]
++
++    def get_clean_subnet_weight(self, node_module) -> None:
++        new_weight = self(node_module.weight)
++        node_module.weight = nn.Parameter(new_weight)
++        node_module.embedding_dim = self._active_width
++
+ 
+ class EWHandlerStateNames:
+     WIDTH_NUM_PARAMS_INDICATOR = "width_num_params_indicator"
+@@ -685,7 +726,7 @@ class ElasticWidthHandler(SingleElasticityHandler):
+                         if not previous_nodes:
+                             break
+                         for previous in previous_nodes:
+-                            if "output_mask" in previous.data:
++                            if "output_mask" in previous.attributes:
+                                 if previous.attributes["output_mask"] is not None:
+                                     input_masks.append(previous.attributes["output_mask"])
+                                     input_masks = [i for i in input_masks if i]
+@@ -781,7 +822,25 @@ class ElasticWidthHandler(SingleElasticityHandler):
+                 filters_importance = self._filter_importance_fn(weight, minfo.module.target_weight_dim_for_compression)
+                 cumulative_filters_importance += filters_importance
+ 
+-            _, reorder_indexes = torch.sort(cumulative_filters_importance, dim=0, descending=True)
++            # qkv layer
++            if (
++                "query" in group.elements[0].node_name
++                or "key" in group.elements[0].node_name
++                or "value" in group.elements[0].node_name
++            ):
++                print("use qkv head part")
++                head_size = 64  # magic number, need to modify
++                importance_per_head = torch.sum(cumulative_filters_importance.view(-1, head_size), dim=-1)
++                _, reorder_indexes_per_head = torch.sort(importance_per_head, dim=0, descending=True)
++                reorder_indexes = (
++                    torch.range(0, head_size - 1)
++                    .int()
++                    .repeat(len(importance_per_head))
++                    .to(reorder_indexes_per_head.device)
++                    + torch.repeat_interleave(reorder_indexes_per_head, head_size) * head_size
++                )
++            else:
++                _, reorder_indexes = torch.sort(cumulative_filters_importance, dim=0, descending=True)
+             device = get_model_device(self._target_model)
+             reorder_indexes.to(device)
+             # 1.2 Setup reorder indexes as output mask to reorganize filters
+@@ -793,7 +852,93 @@ class ElasticWidthHandler(SingleElasticityHandler):
+         reorder_algo = FilterReorderingAlgorithm(
+             self._target_model, self._propagation_graph, PT_PRUNING_OPERATOR_METATYPES, PTNNCFPruningTensorProcessor
+         )
+-        reorder_algo.reorder_filters()
++        reorder_algo.reorder_filters(self._add_dynamic_inputs)
++
++    def add_weight_importance_model(self, weight_importance_model: NNCFNetwork) -> None:
++        weight_importance_model.eval()
++        self.weight_importance_model = deepcopy(weight_importance_model).to(self._target_model.device)
++        nncf_logger.info("add weight importance model")
++
++    def get_reorder_indexes_per_module(self, ele, weight_importance_module, group_filters_num, device):
++        def get_importance_per_module(module):
++            for key in list(module.pre_ops.keys()):
++                op = module.get_pre_op(key).op
++                importance = torch.sum(op.get_importance(False, expanded=True).to(device), dim=1)
++            return importance
++
++        if "query" in ele.node_name or "key" in ele.node_name or "value" in ele.node_name:
++            replace_name = ele.node_name.split("/")[-2][len("NNCFLinear[") : -1]
++            for correlated_name in ["query", "key", "value"]:
++                node = self._propagation_graph.get_node_by_name(ele.node_name.replace(replace_name, correlated_name))
++                if "output_mask" in node.attributes:
++                    reorder_indexes = node.attributes["output_mask"].tensor
++                    return reorder_indexes
++
++            # brute - force way to compute this <-- can use automatic block search in the future
++            for correlated_name in ["query", "key", "value"]:
++                module = self.weight_importance_model.nncf.get_containing_module(
++                    ele.node_name.replace(replace_name, correlated_name)
++                )
++                if correlated_name == "query":
++                    importance = get_importance_per_module(module)
++                else:
++                    importance += get_importance_per_module(module)
++                # importance per head
++                head_size = 64
++                importance_per_head = torch.sum(importance.view(-1, head_size), dim=-1)
++                _, reorder_indexes_per_head = torch.sort(importance_per_head, dim=0, descending=True)
++                reorder_indexes = (
++                    torch.range(0, head_size - 1)
++                    .int()
++                    .repeat(len(importance_per_head))
++                    .to(reorder_indexes_per_head.device)
++                    + torch.repeat_interleave(reorder_indexes_per_head, head_size) * head_size
++                )
++                nncf_logger.info("Use importance per block to reorder QKV weights")
++        else:
++            importance = get_importance_per_module(weight_importance_module)
++            _, reorder_indexes = torch.sort(importance, dim=0, descending=True)
++
++        return reorder_indexes
++
++    def reorganize_weights_with_importance_mask(self) -> None:
++        """
++        Reorder output filters in descending order of their importance.
++        """
++
++        weight_importance_model = getattr(self, "weight_importance_model", None)
++        assert weight_importance_model is not None, "Please add weight_importance_model before using this function"
++        for node in self._propagation_graph.get_all_nodes():
++            node.attributes.pop("output_mask", None)
++
++        for group in self._pruned_module_groups_info.get_all_clusters():
++            filters_num = torch.tensor([get_filters_num(minfo.module) for minfo in group.elements])
++            if not torch.all(filters_num == filters_num[0]):
++                # the group including embedding layer
++                print(f"not support reorganization: {[ele.node_name for ele in group.elements]}")
++                continue
++            device = group.elements[0].module.weight.device
++
++            for (
++                ele
++            ) in (
++                group.elements
++            ):  # weight importance mask has already considered the correlation between layers --> can do this element by element
++                weight_importance_module = self.weight_importance_model.nncf.get_containing_module(ele.node_name)
++                reorder_indexes = self.get_reorder_indexes_per_module(
++                    ele, weight_importance_module, filters_num[0], device
++                )
++
++                if reorder_indexes is not None:
++                    node = self._propagation_graph.get_node_by_id(ele.nncf_node_id)
++                    node.attributes["output_mask"] = PTNNCFTensor(reorder_indexes)
++                    print(f"add reorder indexes for node: {ele.node_name}")
++
++        # 2. Propagating masks across the graph
++        reorder_algo = FilterReorderingAlgorithm(
++            self._target_model, self._propagation_graph, PT_PRUNING_OPERATOR_METATYPES, PTNNCFPruningTensorProcessor
++        )
++        reorder_algo.reorder_filters(self._add_dynamic_inputs)
+ 
+     def find_pairs_of_nodes_with_different_width(self, pairs_of_nodes: List[Tuple[str, str]]) -> List[int]:
+         """
+@@ -947,7 +1092,7 @@ class ElasticWidthBuilder(SingleElasticityBuilder):
+         device = next(target_model.parameters()).device
+ 
+         if not self._grouped_node_names_to_prune:
+-            prunable_types = [NNCFConv2d, NNCFLinear]
++            prunable_types = [NNCFConv2d, NNCFLinear, NNCFEmbedding]
+             prune_operations_types = [pt.op_func_name for pt in prunable_types]
+             types_of_grouping_ops = PTElementwisePruningOp.get_all_op_aliases()
+             pruning_node_selector = PruningNodeSelector(
+@@ -972,6 +1117,14 @@ class ElasticWidthBuilder(SingleElasticityBuilder):
+             PTModuleConv2dMetatype: self._create_elastic_conv_width_op,
+             PTDepthwiseConv2dSubtype: self._create_elastic_conv_width_op,
+             PTModuleLinearMetatype: self._create_elastic_linear_width_op,
++            PTModuleEmbeddingMetatype: self._create_elastic_embedding_width_op,
++        }
++
++        metatype_vs_update_params_op = {
++            PTModuleConv2dMetatype: UpdateWeightAndOptionalBias,
++            PTDepthwiseConv2dSubtype: UpdateWeightAndOptionalBias,
++            PTModuleLinearMetatype: UpdateWeightAndOptionalBias,
++            PTModuleEmbeddingMetatype: UpdateWeight,
+         }
+ 
+         for i, grouped_node_names in enumerate(self._grouped_node_names_to_prune):
+@@ -993,7 +1146,8 @@ class ElasticWidthBuilder(SingleElasticityBuilder):
+                     self._overwrite_groups_widths[i] if self._overwriting_pruning_groups else [],
+                 )
+                 elastic_width_operation.to(device)
+-                update_conv_params_op = UpdateWeightAndOptionalBias(elastic_width_operation)
++                update_params_op = metatype_vs_update_params_op[metatype]
++                update_conv_params_op = update_params_op(elastic_width_operation)
+                 transformation_commands.append(
+                     PTInsertionCommand(
+                         PTTargetPoint(TargetType.PRE_LAYER_OPERATION, target_node_name=node_name),
+@@ -1003,7 +1157,7 @@ class ElasticWidthBuilder(SingleElasticityBuilder):
+                 )
+                 pruned_module = target_model.nncf.get_containing_module(node_name)
+                 assert isinstance(
+-                    pruned_module, (nn.Conv2d, nn.Linear)
++                    pruned_module, (nn.Conv2d, nn.Linear, nn.Embedding)
+                 ), "currently prune only 2D Convolutions and Linear layers"
+ 
+                 group_minfos.append(
+@@ -1118,6 +1272,21 @@ class ElasticWidthBuilder(SingleElasticityBuilder):
+             linear_layer_attrs.out_features, node_name, params, fixed_width_list=fixed_width_list
+         )
+ 
++    @staticmethod
++    def _create_elastic_embedding_width_op(
++        embedding_layer_attrs: BaseLayerAttributes,
++        node_name: str,
++        params: ElasticWidthParams,
++        fixed_width_list: Optional[List[int]] = None,
++    ) -> ElasticOutputWidthEmbeddingOp:
++        assert isinstance(embedding_layer_attrs, EmbeddingLayerAttributes)
++        if fixed_width_list is None:
++            fixed_width_list = []
++        nncf_logger.info("Adding Dynamic Embedding Layer in scope: {}".format(str(node_name)))
++        return ElasticOutputWidthEmbeddingOp(
++            embedding_layer_attrs.embedding_dim, node_name, params, fixed_width_list=fixed_width_list
++        )
++
+     @staticmethod
+     def _create_dynamic_conv_input_op(conv_layer_attrs: BaseLayerAttributes, node_name: str) -> UpdateWeight:
+         assert isinstance(conv_layer_attrs, ConvolutionLayerAttributes)
+diff --git a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/filter_reorder.py b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/filter_reorder.py
+index ef10ff53..5ae61edc 100644
+--- a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/filter_reorder.py
++++ b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/filter_reorder.py
+@@ -17,6 +17,7 @@ from nncf.common.logging import nncf_logger
+ from nncf.common.pruning.mask_propagation import MaskPropagationAlgorithm
+ from nncf.common.pruning.tensor_processor import NNCFPruningBaseTensorProcessor
+ from nncf.common.pruning.utils import PruningOperationsMetatypeRegistry
++from nncf.common.pruning.utils import get_input_masks
+ from nncf.torch.nncf_network import NNCFNetwork
+ 
+ 
+@@ -53,7 +54,7 @@ class FilterReorderingAlgorithm(MaskPropagationAlgorithm):
+                     pruned_node_modules.append(node_module)
+             nncf_logger.debug("Finished mask applying step")
+ 
+-    def reorder_filters(self) -> None:
++    def reorder_filters(self, add_dynamic_inputs=None) -> None:
+         """
+         Model pruner work in two stages:
+         1. Mask propagation: propagate pruning masks through the graph.
+@@ -61,5 +62,38 @@ class FilterReorderingAlgorithm(MaskPropagationAlgorithm):
+         """
+         nncf_logger.info("Start reordering filters")
+         self.mask_propagation()
++        self.elastic_width_add_dynamic_inputs(add_dynamic_inputs)
+         self.apply_reordering_indexes()
+         nncf_logger.info("Finished reordering filters")
++
++    def elastic_width_add_dynamic_inputs(self, add_dynamic_inputs=None) -> None:
++        # we should add input masks for nodes in `add_dynamic_inputs`, similar to activate_subnet_config
++        if add_dynamic_inputs:
++            for node_name in add_dynamic_inputs:
++                ori_node = self._graph.get_node_by_name(node_name)
++                nncf_logger.debug(f"setting input width by user's request for scope={node_name}")
++                nodes_to_check = [ori_node]
++                input_masks = [None]
++                while any(elem is None for elem in input_masks):
++                    previous_nodes = []
++                    for node in nodes_to_check:
++                        previous_nodes.append(self._graph.get_previous_nodes(node))
++                    nodes_to_check.clear()
++                    previous_nodes = [item for nodes in previous_nodes for item in nodes]
++                    if not previous_nodes:
++                        break
++                    for previous in previous_nodes:
++                        if "output_mask" in previous.attributes:
++                            if previous.attributes["output_mask"] is not None:
++                                input_masks.append(previous.attributes["output_mask"])
++                                input_masks = [i for i in input_masks if i]
++                            else:
++                                nodes_to_check.append(previous)
++                        else:
++                            nodes_to_check.append(previous)
++                if input_masks:  # force set input mask
++                    filters_num = self._model.nncf.get_containing_module(ori_node.node_name).weight.size(0)
++                    input_mask = input_masks[0]
++                    if input_mask and input_mask.tensor.size(0) == filters_num:
++                        prev_node = self._graph.get_previous_nodes(ori_node)[0]
++                        prev_node.attributes["output_mask"] = input_mask
+diff --git a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/multi_elasticity_handler.py b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/multi_elasticity_handler.py
+index 4beca169..a4304ce5 100644
+--- a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/multi_elasticity_handler.py
++++ b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/multi_elasticity_handler.py
+@@ -29,6 +29,7 @@ from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import E
+ from nncf.torch.graph.operator_metatypes import PTDepthwiseConv1dSubtype
+ from nncf.torch.graph.operator_metatypes import PTDepthwiseConv2dSubtype
+ from nncf.torch.graph.operator_metatypes import PTDepthwiseConv3dSubtype
++from nncf.torch.graph.operator_metatypes import PTMatMulMetatype
+ from nncf.torch.graph.operator_metatypes import PTModuleConv1dMetatype
+ from nncf.torch.graph.operator_metatypes import PTModuleConv2dMetatype
+ from nncf.torch.graph.operator_metatypes import PTModuleConv3dMetatype
+@@ -37,6 +38,7 @@ from nncf.torch.graph.operator_metatypes import PTModuleConvTranspose3dMetatype
+ from nncf.torch.graph.operator_metatypes import PTModuleLinearMetatype
+ from nncf.torch.nncf_network import NNCFNetwork
+ from nncf.torch.pruning.utils import collect_output_shapes
++from nncf.torch.pruning.utils import count_flops_and_weights_per_PTnode
+ 
+ SubnetConfig = OrderedDictType[ElasticityDim, ElasticityConfig]
+ 
+@@ -46,6 +48,22 @@ class MEHandlerStateNames:
+     STATES_OF_HANDLERS = "states_of_handlers"
+ 
+ 
++GENERAL_CONV_LAYER_METATYPES = [
++    PTModuleConv1dMetatype,
++    PTDepthwiseConv1dSubtype,
++    PTModuleConv2dMetatype,
++    PTDepthwiseConv2dSubtype,
++    PTModuleConv3dMetatype,
++    PTDepthwiseConv3dSubtype,
++    PTModuleConvTranspose2dMetatype,
++    PTModuleConvTranspose3dMetatype,
++]
++LINEAR_LAYER_METATYPES = [PTModuleLinearMetatype]
++MATMUL_LAYER_METATYPES = [
++    PTMatMulMetatype,
++]
++
++
+ # pylint: disable=too-many-public-methods
+ class MultiElasticityHandler(ElasticityHandler):
+     """
+@@ -59,17 +77,6 @@ class MultiElasticityHandler(ElasticityHandler):
+     _state_names = MEHandlerStateNames
+ 
+     def __init__(self, handlers: OrderedDictType[ElasticityDim, SingleElasticityHandler], target_model: NNCFNetwork):
+-        GENERAL_CONV_LAYER_METATYPES = [
+-            PTModuleConv1dMetatype,
+-            PTDepthwiseConv1dSubtype,
+-            PTModuleConv2dMetatype,
+-            PTDepthwiseConv2dSubtype,
+-            PTModuleConv3dMetatype,
+-            PTDepthwiseConv3dSubtype,
+-            PTModuleConvTranspose2dMetatype,
+-            PTModuleConvTranspose3dMetatype,
+-        ]
+-        LINEAR_LAYER_METATYPES = [PTModuleLinearMetatype]
+         self._handlers = handlers
+         self._target_model = target_model
+         self._is_handler_enabled_map = {elasticity_dim: True for elasticity_dim in handlers}
+@@ -254,15 +261,20 @@ class MultiElasticityHandler(ElasticityHandler):
+         graph = self._target_model.nncf.get_graph()
+         output_shapes = collect_output_shapes(graph)
+ 
+-        flops, num_weights = self._weights_calc.count_flops_and_weights(
++        flops_pers_node, num_weights_per_node = count_flops_and_weights_per_PTnode(
+             graph=graph,
+             output_shapes=output_shapes,
+             input_channels=input_width_values,
+             output_channels=output_width_values,
+             kernel_sizes=kernel_sizes,
+             op_addresses_to_skip=names_of_skipped_nodes,
++            conv_op_metatypes=GENERAL_CONV_LAYER_METATYPES,
++            linear_op_metatypes=LINEAR_LAYER_METATYPES,
++            matmul_op_metatypes=MATMUL_LAYER_METATYPES,
+         )
+ 
++        flops = sum(flops_pers_node.values())
++        num_weights = sum(num_weights_per_node.values())
+         return flops, num_weights
+ 
+     def _get_handler_by_elasticity_dim(self, dim: ElasticityDim) -> Optional[SingleElasticityHandler]:
+diff --git a/nncf/experimental/torch/nas/bootstrapNAS/search/search.py b/nncf/experimental/torch/nas/bootstrapNAS/search/search.py
+index 3858d2ee..465a122b 100644
+--- a/nncf/experimental/torch/nas/bootstrapNAS/search/search.py
++++ b/nncf/experimental/torch/nas/bootstrapNAS/search/search.py
+@@ -10,6 +10,7 @@
+ # limitations under the License.
+ import csv
+ from abc import abstractmethod
++from copy import deepcopy
+ from enum import Enum
+ from pathlib import Path
+ from typing import Any, Callable, Dict, List, NoReturn, Optional, Tuple, TypeVar
+@@ -17,6 +18,7 @@ from typing import Any, Callable, Dict, List, NoReturn, Optional, Tuple, TypeVar
+ import numpy as np
+ import torch
+ from pymoo.algorithms.moo.nsga2 import NSGA2
++from pymoo.algorithms.moo.rnsga2 import RNSGA2
+ from pymoo.core.problem import Problem
+ from pymoo.operators.crossover.sbx import SBX
+ from pymoo.operators.mutation.pm import PM
+@@ -50,6 +52,7 @@ ValFnType = Callable[[TModel, DataLoaderType], float]
+ 
+ class EvolutionaryAlgorithms(Enum):
+     NSGA2 = "NSGA2"
++    RNSGA2 = "RNSGA2"
+ 
+ 
+ class SearchParams:
+@@ -69,6 +72,10 @@ class SearchParams:
+         mutation_eta: float,
+         acc_delta: float,
+         ref_acc: float,
++        aspiration_points: np.ndarray,
++        epsilon: float,
++        weights: np.ndarray,
++        extreme_points_as_ref_points: bool,
+     ):
+         """
+         Initializes storage class for search parameters.
+@@ -83,6 +90,10 @@ class SearchParams:
+         :param mutation_eta: Mutation eta
+         :param acc_delta: Tolerated accuracy delta to select a single sub-network from Pareto front.
+         :param ref_acc: Accuracy of input model or reference.
++        :param aspiration_points: Aspiration or reference points for RNSGA-II.
++        :param epsilon: epsilon distance of surviving solutions for RNSGA-II .
++        :param weights: weights used by RNSGA-II.
++        :param extreme_points_as_ref_points: Find extreme points and use them as aspiration points.
+         """
+         self.num_constraints = num_constraints
+         self.population = population
+@@ -96,6 +107,10 @@ class SearchParams:
+         self.mutation_eta = mutation_eta
+         self.acc_delta = acc_delta
+         self.ref_acc = ref_acc
++        self.aspiration_points = aspiration_points
++        self.epsilon = epsilon
++        self.weights = weights
++        self.extreme_points_as_ref_points = extreme_points_as_ref_points
+ 
+     @classmethod
+     def from_dict(cls, search_config: Dict[str, Any]) -> "SearchParams":
+@@ -115,6 +130,11 @@ class SearchParams:
+         mutation_eta = search_config.get("mutation_eta", 3.0)
+         acc_delta = search_config.get("acc_delta", 1)
+         ref_acc = search_config.get("ref_acc", -1)
++        aspiration_points = search_config.get("aspiration_points", [[0, 0]])
++        aspiration_points = np.array(aspiration_points)
++        epsilon = search_config.get("epsilon", 0.001)
++        weights = search_config.get("weights", None)
++        extreme_points_as_ref_points = search_config.get("extreme_points_as_ref_points", False)
+ 
+         return cls(
+             num_evals,
+@@ -127,6 +147,10 @@ class SearchParams:
+             mutation_eta,
+             acc_delta,
+             ref_acc,
++            aspiration_points,
++            epsilon,
++            weights,
++            extreme_points_as_ref_points,
+         )
+ 
+ 
+@@ -148,7 +172,7 @@ class BaseSearchAlgorithm:
+         self._search_records = []
+         self.bad_requests = []
+         self.best_config = None
+-        self.best_vals = None
++        self.best_vals = [None, None]
+         self.best_pair_objective = float("inf")
+         self._tb = None
+ 
+@@ -195,6 +219,8 @@ class SearchAlgorithm(BaseSearchAlgorithm):
+         """
+         super().__init__()
+         self._model = model
++        # Only for experiments to have subnets start with the same set of weights and then perform batchnorm adapt..
++        self._ori_model_state_dict = deepcopy(model.state_dict())
+         self._elasticity_ctrl = elasticity_ctrl
+         search_config = nncf_config.get("bootstrapNAS", {}).get("search", {})
+         self.num_obj = None
+@@ -203,11 +229,12 @@ class SearchAlgorithm(BaseSearchAlgorithm):
+         self._verbose = verbose
+         self._top1_accuracy_validation_fn = None
+         self._val_loader = None
+-        evo_algo = search_config["algorithm"]
+-        if evo_algo == EvolutionaryAlgorithms.NSGA2.value:
++        self._algorithm_name = search_config["algorithm"]
++        sampling = IntegerRandomSampling()
++        if self._algorithm_name == EvolutionaryAlgorithms.NSGA2.value:
+             self._algorithm = NSGA2(
+                 pop_size=self.search_params.population,
+-                sampling=IntegerRandomSampling(),
++                sampling=sampling,
+                 crossover=SBX(
+                     prob=self.search_params.crossover_prob,
+                     eta=self.search_params.crossover_eta,
+@@ -223,8 +250,32 @@ class SearchAlgorithm(BaseSearchAlgorithm):
+                 eliminate_duplicates=True,
+                 save_history=False,
+             )
++        elif self._algorithm_name == EvolutionaryAlgorithms.RNSGA2.value:
++            self._algorithm = RNSGA2(
++                ref_points=self.search_params.aspiration_points,
++                pop_size=self.search_params.population,
++                epsilon=self.search_params.epsilon,
++                normalization="front",
++                extreme_points_as_reference_points=self.search_params.extreme_points_as_ref_points,
++                sampling=sampling,
++                crossover=SBX(
++                    prob=self.search_params.crossover_prob,
++                    eta=self.search_params.crossover_eta,
++                    vtype=float,
++                    repair=RoundingRepair(),
++                ),
++                mutation=PM(
++                    prob=self.search_params.mutation_prob,
++                    eta=self.search_params.mutation_eta,
++                    vtype=float,
++                    repair=RoundingRepair(),
++                ),
++                weights=self.search_params.weights,
++                eliminate_duplicates=True,
++                save_history=False,
++            )
+         else:
+-            raise NotImplementedError(f"Evolutionary Search Algorithm {evo_algo} not implemented")
++            raise NotImplementedError(f"Search Algorithm {self._algorithm_name} not implemented")
+         self._num_vars = 0
+         self._vars_lower = 0
+         self._vars_upper = []
+@@ -376,12 +427,14 @@ class SearchAlgorithm(BaseSearchAlgorithm):
+ 
+         if self.best_config is not None:
+             self._elasticity_ctrl.multi_elasticity_handler.activate_subnet_for_config(self.best_config)
++            self._model.load_state_dict(self._ori_model_state_dict)
+             if self.bn_adaptation is not None:
+                 self.bn_adaptation.run(self._model)
+             ret_vals = self.best_vals
+         else:
+             nncf_logger.warning("Couldn't find a subnet that satisfies the requirements. Returning maximum subnet.")
+             self._elasticity_ctrl.multi_elasticity_handler.activate_maximum_subnet()
++            self._model.load_state_dict(self._ori_model_state_dict)
+             if self.bn_adaptation is not None:
+                 self.bn_adaptation.run(self._model)
+             self.best_config = self._elasticity_ctrl.multi_elasticity_handler.get_active_config()
+@@ -400,46 +453,56 @@ class SearchAlgorithm(BaseSearchAlgorithm):
+         """
+         import matplotlib.pyplot as plt
+ 
+-        with noninteractive_plotting():
+-            plt.figure()
+-            colormap = plt.cm.get_cmap("viridis")
+-            col = range(int(self.search_params.num_evals / self.search_params.population))
+-            for i in range(0, len(self.search_records), self.search_params.population):
+-                c = [col[int(i / self.search_params.population)]] * len(
+-                    self.search_records[i : i + self.search_params.population]
+-                )
+-                plt.scatter(
+-                    [abs(row[2]) for row in self.search_records][i : i + self.search_params.population],
+-                    [abs(row[4]) for row in self.search_records][i : i + self.search_params.population],
+-                    s=9,
+-                    c=c,
+-                    alpha=0.5,
+-                    marker="D",
+-                    cmap=colormap,
+-                )
++        plt.figure()
++        colormap = plt.cm.get_cmap("viridis")
++        col = range(int(self.search_params.num_evals / self.search_params.population))
++        for i in range(0, len(self.search_records), self.search_params.population):
++            c = [col[int(i / self.search_params.population)]] * len(
++                self.search_records[i : i + self.search_params.population]
++            )
++            plt.scatter(
++                [abs(row[2]) for row in self.search_records][i : i + self.search_params.population],
++                [abs(row[4]) for row in self.search_records][i : i + self.search_params.population],
++                s=9,
++                c=c,
++                alpha=0.5,
++                marker="D",
++                cmap=colormap,
++            )
++        plt.scatter(
++            *tuple(abs(ev.input_model_value) for ev in self.evaluator_handlers),
++            marker="s",
++            s=120,
++            color="blue",
++            label="Input Model",
++            edgecolors="black",
++        )
++        if None not in self.best_vals:
+             plt.scatter(
+-                *tuple(abs(ev.input_model_value) for ev in self.evaluator_handlers),
+-                marker="s",
++                *tuple(abs(val) for val in self.best_vals),
++                marker="o",
+                 s=120,
+-                color="blue",
+-                label="Input Model",
++                color="yellow",
++                label="BootstrapNAS A",
+                 edgecolors="black",
++                linewidth=2.5,
+             )
+-            if None not in self.best_vals:
++        if self._algorithm_name == EvolutionaryAlgorithms.RNSGA2.value:
++            for point in self._algorithm.survival.ref_points:
+                 plt.scatter(
+-                    *tuple(abs(val) for val in self.best_vals),
+-                    marker="o",
+-                    s=120,
+-                    color="yellow",
+-                    label="BootstrapNAS A",
++                    point[0],
++                    point[1],
++                    marker="^",
++                    color="gray",
++                    label="Reference Points",
+                     edgecolors="black",
+                     linewidth=2.5,
+                 )
+-            plt.legend()
+-            plt.title("Search Progression")
+-            plt.xlabel(self.efficiency_evaluator_handler.name)
+-            plt.ylabel(self.accuracy_evaluator_handler.name)
+-            plt.savefig(f"{self._log_dir}/{filename}.png")
++        plt.legend()
++        plt.title(f"Search Progression ({self._algorithm_name})")
++        plt.xlabel(self.efficiency_evaluator_handler.name)
++        plt.ylabel(self.accuracy_evaluator_handler.name)
++        plt.savefig(f"{self._log_dir}/{filename}.png")
+ 
+     def save_evaluators_state(self) -> NoReturn:
+         """
+@@ -497,6 +560,7 @@ class SearchProblem(Problem):
+         self._accuracy_evaluator_handler = search.accuracy_evaluator_handler
+         self._efficiency_evaluator_handler = search.efficiency_evaluator_handler
+         self._model = search._model
++        self._ori_model_state_dict = search._ori_model_state_dict
+         self._lower_bound_acc = search.search_params.ref_acc - search.acc_delta
+ 
+     def _evaluate(self, x: List[float], out: Dict[str, Any], *args, **kargs) -> NoReturn:
+@@ -528,6 +592,7 @@ class SearchProblem(Problem):
+                 in_cache, value = evaluator_handler.retrieve_from_cache(tuple(x_i))
+                 if not in_cache:
+                     if not bn_adaption_executed and self._search.bn_adaptation is not None:
++                        self._model.load_state_dict(self._ori_model_state_dict)
+                         self._search.bn_adaptation.run(self._model)
+                         bn_adaption_executed = True
+                     value = evaluator_handler.evaluate_and_add_to_cache_from_pymoo(tuple(x_i))
+@@ -540,6 +605,11 @@ class SearchProblem(Problem):
+             self._save_checkpoint_best_subnetwork(sample)
+             self._search_records.append(result)
+ 
++            if len(self._search_records) % self._search.search_params.population == 0:
++                print("save search progression fig")
++                self._search.visualize_search_progression(f"search_progression_{len(self._search_records)}")
++                self._search.search_progression_to_csv()
++
+         self._iter += 1
+         out["F"] = np.column_stack(list(evaluators_arr))
+ 
+diff --git a/nncf/experimental/torch/nas/bootstrapNAS/search/supernet.py b/nncf/experimental/torch/nas/bootstrapNAS/search/supernet.py
+index d64a3269..01758da1 100644
+--- a/nncf/experimental/torch/nas/bootstrapNAS/search/supernet.py
++++ b/nncf/experimental/torch/nas/bootstrapNAS/search/supernet.py
+@@ -9,12 +9,19 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ 
++import csv
++from copy import deepcopy
++from functools import reduce
+ from typing import Any, Callable, Dict, List, Tuple, TypeVar
+ 
++import numpy as np
+ import torch
++import torch.nn as nn
++from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
+ 
+ from nncf import NNCFConfig
+ from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_controller import ElasticityController
++from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import ElasticityDim
+ from nncf.experimental.torch.nas.bootstrapNAS.elasticity.multi_elasticity_handler import SubnetConfig
+ from nncf.experimental.torch.nas.bootstrapNAS.training.model_creator_helpers import resume_compression_from_state
+ from nncf.torch.checkpoint_loading import load_state
+@@ -31,7 +38,7 @@ class TrainedSuperNet:
+     third party solutions for subnetwork search on existing super-networks.
+     """
+ 
+-    def __init__(self, elastic_ctrl: ElasticityController, nncf_network: NNCFNetwork):
++    def __init__(self, elastic_ctrl: ElasticityController, nncf_network: NNCFNetwork, original_torch_model: nn.Module):
+         """
+         Initializes the super-network interface.
+ 
+@@ -41,6 +48,7 @@ class TrainedSuperNet:
+         self._m_handler = elastic_ctrl.multi_elasticity_handler
+         self._elasticity_ctrl = elastic_ctrl
+         self._model = nncf_network
++        self._original_torch_model = original_torch_model
+ 
+     @classmethod
+     def from_checkpoint(
+@@ -59,13 +67,14 @@ class TrainedSuperNet:
+         :param supernet_weights_path: trained weights to resume the super-network.
+         :return: SuperNetwork with wrapped functionality.
+         """
++        original_torch_model = deepcopy(model)
+         nncf_network = create_nncf_network(model, nncf_config)
+         compression_state = torch.load(supernet_elasticity_path, map_location=torch.device(nncf_config.device))
+         model, elasticity_ctrl = resume_compression_from_state(nncf_network, compression_state)
+         model_weights = torch.load(supernet_weights_path, map_location=torch.device(nncf_config.device))
+         load_state(model, model_weights, is_resume=True)
+         elasticity_ctrl.multi_elasticity_handler.activate_maximum_subnet()
+-        return TrainedSuperNet(elasticity_ctrl, model)
++        return TrainedSuperNet(elasticity_ctrl, model, original_torch_model)
+ 
+     def get_search_space(self) -> Dict:
+         """
+@@ -156,3 +165,179 @@ class TrainedSuperNet:
+         :return: the nncf network with the current active configuration.
+         """
+         return self._model
++
++    @torch.no_grad()
++    def get_clean_subnet(self) -> nn.Module:
++        """
++        Remove pre-ops and post-ops by directly pruning weights shape. Returns a subnet without NNCF wrappers.
++        """
++
++        def get_module_by_name(model_, access_string):
++            names = access_string.split(sep=".")
++            return reduce(getattr, names, model_)
++
++        config = self.get_active_config()
++        subnet_model = deepcopy(self._model)
++        torch_model = deepcopy(self._original_torch_model)
++
++        # elastic width - update weight width
++        if ElasticityDim.WIDTH in config:
++            for cluster_id, _ in config[ElasticityDim.WIDTH].items():
++                cluster = self._m_handler.width_handler._pruned_module_groups_info.get_cluster_by_id(cluster_id)
++                for elastic_width_info in cluster.elements:
++                    node_module = self._model.nncf.get_containing_module(elastic_width_info.node_name)
++                    subnet_module = subnet_model.nncf.get_containing_module(elastic_width_info.node_name)
++                    for op_id in node_module.pre_ops.keys():
++                        node_module.pre_ops[op_id].op.get_clean_subnet_weight(subnet_module)
++
++            for (
++                node_name,
++                dynamic_input_width_op,
++            ) in self._m_handler.width_handler._node_name_vs_dynamic_input_width_op_map.items():
++                subnet_module = subnet_model.nncf.get_containing_module(node_name)
++                dynamic_input_width_op.get_clean_subnet_weight(subnet_module)
++
++            # update weights in torch model (now only supports transformers)
++            for pt_name, pt_module in torch_model.named_modules():
++                if isinstance(pt_module, nn.Linear):
++                    nncf_module = get_module_by_name(subnet_model, pt_name)
++                    pt_module.in_features = nncf_module.in_features
++                    pt_module.out_features = nncf_module.out_features
++                    pt_module.weight = deepcopy(nncf_module.weight)
++                    pt_module.bias = deepcopy(nncf_module.bias)
++                if isinstance(pt_module, nn.Embedding):
++                    nncf_module = get_module_by_name(subnet_model, pt_name)
++                    pt_module.weight = deepcopy(nncf_module.weight)
++                    pt_module.embedding_dim = nncf_module.embedding_dim
++                if isinstance(pt_module, nn.LayerNorm):
++                    nncf_module = get_module_by_name(subnet_model, pt_name)
++                    pt_module.weight = deepcopy(nncf_module.weight)
++                    pt_module.bias = deepcopy(nncf_module.bias)
++                    pt_module.normalized_shape = nncf_module.normalized_shape
++
++        # elastic depth - replace with identity
++        if ElasticityDim.DEPTH in config or ElasticityDim.KERNEL in config:
++            raise NotImplementedError
++
++        return torch_model
++
++    @classmethod
++    def generate_pareto_front_subnets_from_csv(cls, csv_file: str, save_file: str):
++        """
++        Generate pareto front subnets based on search_progression.csv.
++        """
++
++        def convert_str_config(str_config):
++            # an ugly verison - assume elastic width in str_config
++            subnet_config = SubnetConfig()
++
++            assert "ElasticityDim.WIDTH" in str_config
++
++            if "ElasticityDim.KERNEL" in str_config:
++                raise NotImplementedError
++            if "ElasticityDim.DEPTH" in str_config:
++                str_width_config, str_depth_config = str_config.split("}), (<ElasticityDim.DEPTH: 'depth'>, ")
++            else:
++                str_width_config = str_config.split("})")[0]
++                str_depth_config = None
++
++            str_width_config = str_width_config.split("OrderedDict([(<ElasticityDim.WIDTH: 'width'>, {")[-1]
++            width_config = {}
++            for block in str_width_config.split(", "):
++                block_id, block_w = block.split(": ")
++                width_config[int(block_id)] = int(block_w)
++            subnet_config[ElasticityDim.WIDTH] = width_config
++
++            if str_depth_config is not None:
++                str_depth_config = str_depth_config.split(")])")[0]
++                depth_config = []
++                if str_depth_config != "[]":
++                    depth_config = [int(block_id) for block_id in str_depth_config[1:-1].split(", ")]
++                subnet_config[ElasticityDim.DEPTH] = depth_config
++
++            return subnet_config
++
++        with open(csv_file) as f:
++            reader = csv.reader(f)
++            subnet_configs = []
++            eva_arr = []
++            for row in reader:
++                subnet_configs.append(convert_str_config(row[0]))
++                eva_arr.append([float(row[-3]), float(row[-1])])  # MACs, f1-score
++
++        F = np.column_stack(list(eva_arr)).transpose()
++        pareto_front = NonDominatedSorting(method="fast_non_dominated_sort").do(F, only_non_dominated_front=True)
++        pareto_front_subnets = [subnet_configs[idx] for idx in pareto_front]
++        pareto_front_eva_arr = [eva_arr[idx] for idx in pareto_front]
++        # sort based on MACs
++        sort_idx = np.argsort(np.column_stack(pareto_front_eva_arr)[0])
++        pareto_front_subnets = [pareto_front_subnets[idx] for idx in sort_idx]
++        pareto_front_eva_arr = [pareto_front_eva_arr[idx] for idx in sort_idx]
++
++        pareto_front_info = []
++        for pareto_front_subnet, eva_arr in zip(pareto_front_subnets, pareto_front_eva_arr):
++            info_dict = {
++                "subnet_config": pareto_front_subnet,
++                "f1_score": -eva_arr[1],  # f1-score
++                "MACs": eva_arr[0],  # MACs
++            }
++            pareto_front_info.append(info_dict)
++        torch.save(pareto_front_info, save_file)
++        print(f"save pareto front info to {save_file}")
++
++
++if __name__ == "__main__":
++    # test bert
++    from pathlib import Path
++
++    import jstyleson as json
++    from transformers import AutoModelForQuestionAnswering
++
++    from nncf.common.utils.os import safe_open
++
++    model_name = "bert-base-uncased"
++    supernet_weights_path = (
++        "/home/jpmunoz/bnas_supernets/transformers/bert_squad_nas/bert_base_best_result/supernet_weights.pth"
++    )
++    supernet_elasticity_path = (
++        "/home/jpmunoz/bnas_supernets/transformers/bert_squad_nas/bert_base_best_result/elasticity_state.pth"
++    )
++    pareto_front_subnets_path = (
++        "/home/jpmunoz/bnas_supernets/transformers/bert_squad_nas/bert_base_best_result/pareto_front_subnets.pth"
++    )
++    nncf_config_path = "/home/jpmunoz/bnas_supernets/transformers/bert_squad_nas/bert_base_best_result/nncf_config.json"
++
++    # prepare model and nncf_config
++    model = AutoModelForQuestionAnswering.from_pretrained(model_name)
++    original_model = deepcopy(model)
++    nncf_config_path = Path(nncf_config_path).resolve()
++    with safe_open(nncf_config_path) as f:
++        loaded_json = json.load(f)
++    nncf_config = NNCFConfig.from_dict(loaded_json)
++    nncf_config.device = "cuda" if torch.cuda.is_available() else "cpu"
++
++    # [optional] load search_progression.csv and generate pareto front subnets
++    # TrainedSuperNet.generate_pareto_front_subnets_from_csv(
++    #     '/home/jpmunoz/bnas_supernets/transformers/bert_squad_nas/bert_base_best_result/search_result/search_progression.csv',
++    #     '/home/jpmunoz/bnas_supernets/transformers/bert_squad_nas/bert_base_best_result/pareto_front_subnets.pth'
++    # )
++
++    # TrainedSuperNet interface
++    train_supernet = TrainedSuperNet.from_checkpoint(
++        model, nncf_config, supernet_elasticity_path, supernet_weights_path
++    )
++
++    # use pareto_front_subnets_path to activate a pareto front subnet
++    pareto_front_subnets = torch.load(pareto_front_subnets_path, map_location=nncf_config.device)
++    # for example, choose a pareto front subnet with index = 5
++    choose_idx = 5
++    print(f"activated subnet info: {pareto_front_subnets[choose_idx]}")
++    train_supernet.activate_config(pareto_front_subnets[choose_idx]["subnet_config"])
++
++    # type 1: get a clean torch network
++    clean_subnet = train_supernet.get_clean_subnet()
++
++    # type 2: export to onnx
++    print("exporting model to onnx...")
++    train_supernet.export_active_subnet_to_onnx()
++    print("done")
+diff --git a/nncf/experimental/torch/nas/bootstrapNAS/training/lr_scheduler.py b/nncf/experimental/torch/nas/bootstrapNAS/training/lr_scheduler.py
+index 4455856a..f6659b15 100644
+--- a/nncf/experimental/torch/nas/bootstrapNAS/training/lr_scheduler.py
++++ b/nncf/experimental/torch/nas/bootstrapNAS/training/lr_scheduler.py
+@@ -133,6 +133,19 @@ class BaseLRScheduler(BaseCompressionScheduler):
+     def get_last_lr(self) -> List[Any]:
+         return [group["lr"] for group in self._optimizer.param_groups]
+ 
++    def state_dict(self) -> Dict[str, Any]:
++        """
++        Returns the state of the scheduler as a :class:`dict`.
++        """
++        return {key: value for key, value in self.__dict__.items() if key != "_optimizer"}
++
++    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
++        """
++        Loads the schedulers state.
++        :param state_dict (dict): scheduler state.
++        """
++        self.__dict__.update(state_dict)
++
+ 
+ class GlobalLRScheduler(BaseLRScheduler):
+     """
+diff --git a/nncf/experimental/torch/nas/bootstrapNAS/training/progressive_shrinking_builder.py b/nncf/experimental/torch/nas/bootstrapNAS/training/progressive_shrinking_builder.py
+index 9191bce7..707a9ab3 100644
+--- a/nncf/experimental/torch/nas/bootstrapNAS/training/progressive_shrinking_builder.py
++++ b/nncf/experimental/torch/nas/bootstrapNAS/training/progressive_shrinking_builder.py
+@@ -103,6 +103,13 @@ class ProgressiveShrinkingBuilder(PTCompressionAlgorithmBuilder):
+         )
+ 
+     def _build_compression_loss_function(self, model: NNCFNetwork) -> "PTCompressionLoss":
++        """
++        Create the compression loss. KnowledgeDistillationLoss is returned when knowledge distillation
++        algorithm is added to the config. By default, ZeroCompressionLoss is returned.
++
++        :param model: The model with additional modifications necessary to enable
++            algorithm-specific compression during fine-tuning.
++        """
+         compression_builder = create_compression_algorithm_builder(self._algo_config)
+         compressed_model = compression_builder.apply_to(model)
+         compression_ctrl = compression_builder.build_controller(compressed_model)
+diff --git a/nncf/experimental/torch/nas/bootstrapNAS/training/scheduler.py b/nncf/experimental/torch/nas/bootstrapNAS/training/scheduler.py
+index 63505dda..426c7f45 100644
+--- a/nncf/experimental/torch/nas/bootstrapNAS/training/scheduler.py
++++ b/nncf/experimental/torch/nas/bootstrapNAS/training/scheduler.py
+@@ -180,6 +180,21 @@ class BootstrapNASScheduler(BaseCompressionScheduler):
+                 self._lr_scheduler.stage_step(stage_desc)
+                 self._training_ctrl.set_stage(stage_desc)
+                 self.current_stage_idx = stage_desc_idx
++        if self.current_epoch % stage_desc.reorg_interval == 0:
++            if stage_desc_idx > 0:
++                raise NotImplementedError
++            width_handler = self._training_ctrl.multi_elasticity_handler.width_handler
++            if width_handler is not None:
++                if getattr(width_handler, "create_importance_mask_fn", None):
++                    nncf_logger.info("Use create_importance_mask_fn to reorganize weight")
++                    width_handler.add_weight_importance_model(
++                        width_handler.create_importance_mask_fn(
++                            width_handler._target_model.state_dict(),
++                            save_folder=f"movement_sparsity_{self.current_epoch}",
++                            bnas_training_ctrl=self._training_ctrl,
++                        )
++                    )
++                    width_handler.reorganize_weights_with_importance_mask()
+ 
+     def is_final_stage(self) -> bool:
+         """
+diff --git a/nncf/experimental/torch/nas/bootstrapNAS/training/stage_descriptor.py b/nncf/experimental/torch/nas/bootstrapNAS/training/stage_descriptor.py
+index 038339db..0d9e41fe 100644
+--- a/nncf/experimental/torch/nas/bootstrapNAS/training/stage_descriptor.py
++++ b/nncf/experimental/torch/nas/bootstrapNAS/training/stage_descriptor.py
+@@ -26,6 +26,7 @@ class SDescriptorParamNames:
+     INIT_LR = "init_lr"
+     EPOCHS_LR = "epochs_lr"
+     SAMPLE_RATE = "sample_rate"
++    REORG_INTERVAL = "reorg_interval"
+ 
+ 
+ class StageDescriptor:
+@@ -46,6 +47,7 @@ class StageDescriptor:
+         init_lr: float = None,
+         epochs_lr: int = None,
+         sample_rate: int = 1,
++        reorg_interval: int = None,
+     ):
+         self.train_dims = train_dims
+         self.epochs = epochs
+@@ -56,10 +58,17 @@ class StageDescriptor:
+         self.init_lr = init_lr
+         self.epochs_lr = epochs_lr
+         self.sample_rate = sample_rate
++        self.reorg_interval = (epochs + 1) if reorg_interval is None else reorg_interval
+         if sample_rate <= 0:
+             nncf_logger.warning(f"Only positive integers are allowed for sample rate, but sample_rate={sample_rate}.")
+             nncf_logger.warning("Setting sample rate to default 1")
+             self.sample_rate = 1
++        if self.reorg_interval <= 0:
++            nncf_logger.warning(
++                f"Only positive integers are allowed for reorg interval, but reorg_interval={reorg_interval}."
++            )
++            nncf_logger.warning("Setting sample rate to default (epoch + 1)")
++            self.reorg_interval = epochs + 1
+ 
+     def __eq__(self, other: "StageDescriptor"):
+         return self.__dict__ == other.__dict__
+@@ -80,6 +89,7 @@ class StageDescriptor:
+             cls._state_names.INIT_LR: config.get(cls._state_names.INIT_LR, None),
+             cls._state_names.EPOCHS_LR: config.get(cls._state_names.EPOCHS_LR, None),
+             cls._state_names.SAMPLE_RATE: config.get(cls._state_names.SAMPLE_RATE, 1),
++            cls._state_names.REORG_INTERVAL: config.get(cls._state_names.REORG_INTERVAL, None),
+         }
+         return cls(**kwargs)
+ 
+@@ -104,6 +114,7 @@ class StageDescriptor:
+             self._state_names.DEPTH_INDICATOR: self.depth_indicator,
+             self._state_names.BN_ADAPT: self.bn_adapt,
+             self._state_names.SAMPLE_RATE: self.sample_rate,
++            self._state_names.REORG_INTERVAL: self.reorg_interval,
+         }
+         if self.init_lr is not None:
+             state_dict["init_lr"] = self.init_lr
+diff --git a/nncf/experimental/torch/nas/bootstrapNAS/training/training_algorithm.py b/nncf/experimental/torch/nas/bootstrapNAS/training/training_algorithm.py
+index d4107a31..ab7e1c16 100644
+--- a/nncf/experimental/torch/nas/bootstrapNAS/training/training_algorithm.py
++++ b/nncf/experimental/torch/nas/bootstrapNAS/training/training_algorithm.py
+@@ -112,6 +112,10 @@ class EpochBasedTrainingAlgorithm:
+         checkpoint_save_dir: str,
+         tensorboard_writer: Optional[TensorboardWriterType] = None,
+         train_iters: Optional[float] = None,
++        config=None,
++        train_sampler=None,
++        create_distributed_fn=None,
++        finetune_config=None,
+     ) -> Tuple[NNCFNetwork, ElasticityController]:
+         """
+         Implements a training loop for supernet training.
+@@ -126,6 +130,8 @@ class EpochBasedTrainingAlgorithm:
+         :param tensorboard_writer: The tensorboard object to be used for logging.
+         :return: the fine-tuned model and elasticity controller
+         """
++        if config.distributed:
++            optimizer, self._model = create_distributed_fn(self._model)
+ 
+         if train_iters is None:
+             train_iters = len(train_loader)
+@@ -150,75 +156,141 @@ class EpochBasedTrainingAlgorithm:
+                 )
+ 
+         total_num_epochs = self._training_ctrl.get_total_num_epochs()
++        finetune_subnet_best_acc1 = 0
+ 
+         best_compression_stage = CompressionStage.UNCOMPRESSED
+         for epoch in range(self._start_epoch, total_num_epochs):
+             self._training_ctrl.scheduler.epoch_step()
+ 
+             # TODO(nlyalyus): support DDP (ticket 56849)
+-            # if config.distributed:
+-            #     train_sampler.set_epoch(epoch)
++            if config.distributed:
++                train_sampler.set_epoch(epoch)
++
++            if epoch == 0:
++                if (
++                    finetune_config
++                ):  # not used in the final version of AAAI. Keep it in case it is needed in the future work
++                    self._training_ctrl.multi_elasticity_handler.activate_subnet_for_config(finetune_config)
++                    (
++                        flops,
++                        weight_params,
++                    ) = self._training_ctrl.multi_elasticity_handler.count_flops_and_weights_for_active_subnet()
++                    print(f"finetune subnet macs: {flops / 2e6} weight param: {weight_params /1e6}")
++                    min_subnet_acc1, acc5, loss = self._validate_subnet(val_fn, val_loader)
++                    print(f"finetune subnet acc 1: {min_subnet_acc1},  acc5: {acc5}")
++                else:
++                    self._training_ctrl.multi_elasticity_handler.activate_minimum_subnet()
++                    (
++                        flops,
++                        weight_params,
++                    ) = self._training_ctrl.multi_elasticity_handler.count_flops_and_weights_for_active_subnet()
++                    print(f"min subnet macs: {flops / 2e6} weight param: {weight_params /1e6}")
++
++                    self._training_ctrl.multi_elasticity_handler.activate_maximum_subnet()
++                    (
++                        flops,
++                        weight_params,
++                    ) = self._training_ctrl.multi_elasticity_handler.count_flops_and_weights_for_active_subnet()
++                    print(f"max subnet macs: {flops / 2e6} weight param: {weight_params /1e6}")
+ 
+             # train for one epoch
+             train_epoch_fn(train_loader, self._model, self._training_ctrl, epoch, optimizer)
+ 
+             compression_stage = self._training_ctrl.compression_stage()
+ 
+-            self._training_ctrl.multi_elasticity_handler.activate_minimum_subnet()
+-            min_subnet_acc1, acc5, loss = self._validate_subnet(val_fn, val_loader)
+-            if log_validation_info:
+-                nncf_logger.info(
+-                    f"* Acc@1 {min_subnet_acc1:.3f} Acc@5 {acc5:.3f} "
+-                    f"for Minimal SubNet={self._training_ctrl.multi_elasticity_handler.get_active_config()}"
++            if finetune_config:
++                finetune_subnet_acc1, acc5, loss = self._validate_subnet(val_fn, val_loader)
++                if log_validation_info:
++                    nncf_logger.info(
++                        f"* Acc@1 {finetune_subnet_acc1:.3f} Acc@5 {acc5:.3f} "
++                        f"for Finetune SubNet={self._training_ctrl.multi_elasticity_handler.get_active_config()}"
++                    )
++                if is_main_process() and log_validation_info:
++                    tensorboard_writer.add_scalar("val/finetune_subnet_loss", loss, len(val_loader) * epoch)
++                    tensorboard_writer.add_scalar(
++                        "val/finetune_subnet_top1", finetune_subnet_acc1, len(val_loader) * epoch
++                    )
++                    tensorboard_writer.add_scalar("val/finetune_subnet_top5", acc5, len(val_loader) * epoch)
++                if finetune_subnet_acc1 > finetune_subnet_best_acc1:
++                    finetune_subnet_best_acc1 = finetune_subnet_acc1
++                if is_main_process():
++                    checkpoint_path = Path(checkpoint_save_dir, "supernet_last.pth")
++                    checkpoint = {
++                        self._state_names.EPOCH: epoch + 1,
++                        self._state_names.MODEL_STATE: self._model.module.state_dict()
++                        if config.distributed
++                        else self._model.state_dict(),
++                        self._state_names.SUPERNET_BEST_ACC1: finetune_subnet_best_acc1,
++                        self._state_names.SUPERNET_ACC1: finetune_subnet_best_acc1,
++                        self._state_names.MIN_SUBNET_BEST_ACC1: finetune_subnet_best_acc1,
++                        self._state_names.MIN_SUBNET_ACC1: finetune_subnet_best_acc1,
++                        self._state_names.OPTIMIZER: optimizer.state_dict(),
++                        self._state_names.TRAINING_ALGO_STATE: CompressionStage.FULLY_COMPRESSED,
++                    }
++                    torch.save(checkpoint, checkpoint_path)
++
++                    if finetune_subnet_best_acc1 == finetune_subnet_acc1:
++                        best_path = Path(checkpoint_save_dir) / "finetune_best.pth"
++                        copyfile(checkpoint_path, best_path)
++            else:
++                self._training_ctrl.multi_elasticity_handler.activate_minimum_subnet()
++                min_subnet_acc1, acc5, loss = self._validate_subnet(val_fn, val_loader)
++                if log_validation_info:
++                    nncf_logger.info(
++                        f"* Acc@1 {min_subnet_acc1:.3f} Acc@5 {acc5:.3f} "
++                        f"for Minimal SubNet={self._training_ctrl.multi_elasticity_handler.get_active_config()}"
++                    )
++                if is_main_process() and log_validation_info:
++                    tensorboard_writer.add_scalar("val/min_subnet_loss", loss, len(val_loader) * epoch)
++                    tensorboard_writer.add_scalar("val/min_subnet_top1", min_subnet_acc1, len(val_loader) * epoch)
++                    tensorboard_writer.add_scalar("val/min_subnet_top5", acc5, len(val_loader) * epoch)
++                min_subnet_best_acc1 = self._define_best_accuracy(
++                    min_subnet_acc1, self._min_subnet_best_acc1, compression_stage, best_compression_stage
+                 )
+-            if is_main_process() and log_validation_info:
+-                tensorboard_writer.add_scalar("val/min_subnet_loss", loss, len(val_loader) * epoch)
+-                tensorboard_writer.add_scalar("val/min_subnet_top1", min_subnet_acc1, len(val_loader) * epoch)
+-                tensorboard_writer.add_scalar("val/min_subnet_top5", acc5, len(val_loader) * epoch)
+-            min_subnet_best_acc1 = self._define_best_accuracy(
+-                min_subnet_acc1, self._min_subnet_best_acc1, compression_stage, best_compression_stage
+-            )
+-
+-            self._training_ctrl.multi_elasticity_handler.activate_supernet()
+-            supernet_acc1, acc5, loss = self._validate_subnet(val_fn, val_loader)
+-            if log_validation_info:
+-                nncf_logger.info(
+-                    f"* Acc@1 {supernet_acc1:.3f} Acc@5 {acc5:.3f} "
+-                    f"of SuperNet={self._training_ctrl.multi_elasticity_handler.get_active_config()}"
++
++                self._training_ctrl.multi_elasticity_handler.activate_maximum_subnet()
++                supernet_acc1, acc5, loss = self._validate_subnet(val_fn, val_loader)
++                if log_validation_info:
++                    nncf_logger.info(
++                        f"* Acc@1 {supernet_acc1:.3f} Acc@5 {acc5:.3f} "
++                        f"of SuperNet={self._training_ctrl.multi_elasticity_handler.get_active_config()}"
++                    )
++
++                if is_main_process() and log_validation_info:
++                    tensorboard_writer.add_scalar("val/supernet_loss", loss, len(val_loader) * epoch)
++                    tensorboard_writer.add_scalar("val/supernet_top1", supernet_acc1, len(val_loader) * epoch)
++                    tensorboard_writer.add_scalar("val/supernet_top5", acc5, len(val_loader) * epoch)
++                supernet_best_acc1 = self._define_best_accuracy(
++                    supernet_acc1, self._supernet_best_acc1, compression_stage, best_compression_stage
+                 )
+ 
+-            if is_main_process() and log_validation_info:
+-                tensorboard_writer.add_scalar("val/supernet_loss", loss, len(val_loader) * epoch)
+-                tensorboard_writer.add_scalar("val/supernet_top1", supernet_acc1, len(val_loader) * epoch)
+-                tensorboard_writer.add_scalar("val/supernet_top5", acc5, len(val_loader) * epoch)
+-            supernet_best_acc1 = self._define_best_accuracy(
+-                supernet_acc1, self._supernet_best_acc1, compression_stage, best_compression_stage
+-            )
+-
+-            best_compression_stage = max(compression_stage, best_compression_stage)
+-
+-            checkpoint_path = Path(checkpoint_save_dir, "supernet_last.pth")
+-            checkpoint = {
+-                self._state_names.EPOCH: epoch + 1,
+-                self._state_names.MODEL_STATE: self._model.state_dict(),
+-                self._state_names.SUPERNET_BEST_ACC1: supernet_best_acc1,
+-                self._state_names.SUPERNET_ACC1: supernet_acc1,
+-                self._state_names.MIN_SUBNET_BEST_ACC1: min_subnet_best_acc1,
+-                self._state_names.MIN_SUBNET_ACC1: min_subnet_acc1,
+-                self._state_names.OPTIMIZER: optimizer.state_dict(),
+-                self._state_names.TRAINING_ALGO_STATE: self._training_ctrl.get_compression_state(),
+-            }
+-            torch.save(checkpoint, checkpoint_path)
+-
+-            if compression_stage == CompressionStage.FULLY_COMPRESSED and supernet_best_acc1 == supernet_acc1:
+-                best_path = Path(checkpoint_save_dir) / "supernet_best.pth"
+-                copyfile(checkpoint_path, best_path)
++                if is_main_process():
++                    best_compression_stage = max(compression_stage, best_compression_stage)
++
++                    checkpoint_path = Path(checkpoint_save_dir, "supernet_last.pth")
++                    checkpoint = {
++                        self._state_names.EPOCH: epoch + 1,
++                        self._state_names.MODEL_STATE: self._model.module.state_dict()
++                        if config.distributed
++                        else self._model.state_dict(),
++                        self._state_names.SUPERNET_BEST_ACC1: supernet_best_acc1,
++                        self._state_names.SUPERNET_ACC1: supernet_acc1,
++                        self._state_names.MIN_SUBNET_BEST_ACC1: min_subnet_best_acc1,
++                        self._state_names.MIN_SUBNET_ACC1: min_subnet_acc1,
++                        self._state_names.OPTIMIZER: optimizer.state_dict(),
++                        self._state_names.TRAINING_ALGO_STATE: self._training_ctrl.get_compression_state(),
++                    }
++                    torch.save(checkpoint, checkpoint_path)
++
++                    if compression_stage == CompressionStage.FULLY_COMPRESSED and supernet_best_acc1 == supernet_acc1:
++                        best_path = Path(checkpoint_save_dir) / "supernet_best.pth"
++                        copyfile(checkpoint_path, best_path)
+ 
+             # Backup elasticity state and model weight to directly restore from it in a separate search sample
+             elasticity_path = Path(checkpoint_save_dir) / "last_elasticity.pth"
+             elasticity_state = self._training_ctrl.elasticity_controller.get_compression_state()
+             model_path = Path(checkpoint_save_dir) / "last_model_weights.pth"
+-            model_state = self._model.state_dict()
++            model_state = self._model.module.state_dict() if config.distributed else self._model.state_dict()
+             torch.save(elasticity_state, elasticity_path)
+             torch.save(model_state, model_path)
+ 
+diff --git a/nncf/experimental/torch/sparsity/movement/functions.py b/nncf/experimental/torch/sparsity/movement/functions.py
+index f24c9f35..677b57fc 100644
+--- a/nncf/experimental/torch/sparsity/movement/functions.py
++++ b/nncf/experimental/torch/sparsity/movement/functions.py
+@@ -14,9 +14,10 @@ from nncf.torch.dynamic_graph.patch_pytorch import register_operator
+ from nncf.torch.functions import STThreshold
+ 
+ 
++# change the max_percentile --> generate search space
+ @register_operator()
+ def binary_mask_by_threshold(
+-    input_tensor: torch.Tensor, threshold: float = 0.5, max_percentile: float = 0.98
++    input_tensor: torch.Tensor, threshold: float = 0.5, max_percentile: float = 1.0  # 0.98
+ ) -> torch.Tensor:
+     """
+     Conduct straight-through thresholding function while limiting the maximum threshold.
+diff --git a/nncf/torch/dynamic_graph/layer_attributes_handlers.py b/nncf/torch/dynamic_graph/layer_attributes_handlers.py
+index 15164518..51253b96 100644
+--- a/nncf/torch/dynamic_graph/layer_attributes_handlers.py
++++ b/nncf/torch/dynamic_graph/layer_attributes_handlers.py
+@@ -15,12 +15,14 @@ from torch.nn import Conv3d
+ from torch.nn import ConvTranspose1d
+ from torch.nn import ConvTranspose2d
+ from torch.nn import ConvTranspose3d
++from torch.nn import Embedding
+ from torch.nn import Linear
+ from torch.nn import Module as TorchModule
+ 
+ from nncf.common.graph.graph import NNCFGraph
+ from nncf.common.graph.layer_attributes import BaseLayerAttributes
+ from nncf.common.graph.layer_attributes import ConvolutionLayerAttributes
++from nncf.common.graph.layer_attributes import EmbeddingLayerAttributes
+ from nncf.common.graph.layer_attributes import GenericWeightedLayerAttributes
+ from nncf.common.graph.layer_attributes import GetItemLayerAttributes
+ from nncf.common.graph.layer_attributes import GroupNormLayerAttributes
+@@ -99,6 +101,12 @@ def get_layer_attributes_from_module(module: TorchModule, operator_name: str) ->
+             with_bias=with_bias,
+         )
+ 
++    if isinstance(module, Embedding):
++        return EmbeddingLayerAttributes(
++            weight_requires_grad=module.weight.requires_grad,
++            num_embeddings=module.num_embeddings,
++            embedding_dim=module.embedding_dim,
++        )
+     if hasattr(module, "weight"):
+         return GenericWeightedLayerAttributes(
+             weight_requires_grad=getattr(module, weight_attr).requires_grad,
+diff --git a/nncf/torch/initialization.py b/nncf/torch/initialization.py
+index 5e06f395..a28a7055 100644
+--- a/nncf/torch/initialization.py
++++ b/nncf/torch/initialization.py
+@@ -264,12 +264,12 @@ def register_default_init_args(
+     legr_train_optimizer: torch.optim.Optimizer = None,
+     device: str = None,
+ ) -> "NNCFConfig":
+-    nncf_config.register_extra_structs(
+-        [
+-            QuantizationRangeInitArgs(data_loader=wrap_dataloader_for_init(train_loader), device=device),
+-            BNAdaptationInitArgs(data_loader=wrap_dataloader_for_init(train_loader), device=device),
+-        ]
+-    )
++    # nncf_config.register_extra_structs(
++    #     [
++    #         QuantizationRangeInitArgs(data_loader=wrap_dataloader_for_init(train_loader), device=device),
++    #         BNAdaptationInitArgs(data_loader=wrap_dataloader_for_init(train_loader), device=device),
++    #     ]
++    # )
+     if train_loader and train_steps_fn and val_loader and validate_fn:
+         nncf_config.register_extra_structs(
+             [
+diff --git a/nncf/torch/pruning/operations.py b/nncf/torch/pruning/operations.py
+index 67f2fad4..1d62a73a 100644
+--- a/nncf/torch/pruning/operations.py
++++ b/nncf/torch/pruning/operations.py
+@@ -23,6 +23,7 @@ from nncf.common.pruning.operations import BatchNormPruningOp
+ from nncf.common.pruning.operations import ConcatPruningOp
+ from nncf.common.pruning.operations import ConvolutionPruningOp
+ from nncf.common.pruning.operations import ElementwisePruningOp
++from nncf.common.pruning.operations import EmbeddingPruningOp
+ from nncf.common.pruning.operations import GroupNormPruningOp
+ from nncf.common.pruning.operations import IdentityMaskForwardPruningOp
+ from nncf.common.pruning.operations import InputPruningOp
+@@ -51,6 +52,7 @@ from nncf.torch.graph.operator_metatypes import PTConvTranspose3dMetatype
+ from nncf.torch.graph.operator_metatypes import PTDivMetatype
+ from nncf.torch.graph.operator_metatypes import PTDropoutMetatype
+ from nncf.torch.graph.operator_metatypes import PTELUMetatype
++from nncf.torch.graph.operator_metatypes import PTEmbeddingMetatype
+ from nncf.torch.graph.operator_metatypes import PTGELUMetatype
+ from nncf.torch.graph.operator_metatypes import PTGroupNormMetatype
+ from nncf.torch.graph.operator_metatypes import PTHardSigmoidMetatype
+@@ -183,6 +185,25 @@ class PTIdentityMaskForwardPruningOp(IdentityMaskForwardPruningOp, PTPruner):
+     additional_types = ["h_sigmoid", "h_swish", "RELU"]
+ 
+ 
++@PT_PRUNING_OPERATOR_METATYPES.register("embedding")
++class PTEmbeddingPruningOp(EmbeddingPruningOp, PTPruner):
++    subtypes = [PTEmbeddingMetatype]
++
++    @classmethod
++    def output_reorder(cls, model: NNCFNetwork, node: NNCFNode, graph: NNCFGraph):
++        reorder_indexes = node.attributes["output_mask"]
++        if reorder_indexes is None:
++            return
++        embedding = model.get_containing_module(node.node_name)
++        reorder_indexes = reorder_indexes.tensor
++        embedding.weight.data = torch.index_select(embedding.weight.data, 1, reorder_indexes)
++        nncf_logger.debug(
++            "Reordered output channels (first 10 reorder indexes {}) of Embedding: {} ".format(
++                reorder_indexes[:10], node.attributes["key"]
++            )
++        )
++
++
+ @PT_PRUNING_OPERATOR_METATYPES.register("convolution")
+ class PTConvolutionPruningOp(ConvolutionPruningOp, PTPruner):
+     subtypes = [PTConv1dMetatype, PTConv2dMetatype, PTConv3dMetatype]
+diff --git a/nncf/torch/pruning/utils.py b/nncf/torch/pruning/utils.py
+index 20ecccdc..866ad675 100644
+--- a/nncf/torch/pruning/utils.py
++++ b/nncf/torch/pruning/utils.py
+@@ -8,15 +8,18 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+-from typing import Dict, List, Optional, Tuple
++from typing import Dict, List, Optional, Tuple, Type
+ 
++import numpy as np
+ import torch
+ 
+ from nncf.common.graph import NNCFGraph
+ from nncf.common.graph import NNCFNodeName
+ from nncf.common.graph.layer_attributes import ConvolutionLayerAttributes
+ from nncf.common.graph.layer_attributes import LinearLayerAttributes
++from nncf.common.graph.operator_metatypes import OperatorMetatype
+ from nncf.common.logging import nncf_logger
++from nncf.common.pruning.utils import is_prunable_depthwise_conv
+ from nncf.torch.graph.graph import NNCFNode
+ from nncf.torch.layers import NNCF_GENERAL_CONV_MODULES_DICT
+ from nncf.torch.layers import NNCF_LINEAR_MODULES_DICT
+@@ -117,3 +120,124 @@ def collect_output_shapes(graph: NNCFGraph) -> Dict[NNCFNodeName, List[int]]:
+             modules_out_shapes[node.node_name] = out_shape
+ 
+     return modules_out_shapes
++
++
++def count_flops_and_weights_per_PTnode(
++    graph: NNCFGraph,
++    output_shapes: Dict[NNCFNodeName, List[int]],
++    conv_op_metatypes: List[Type[OperatorMetatype]],
++    linear_op_metatypes: List[Type[OperatorMetatype]],
++    matmul_op_metatypes: List[Type[OperatorMetatype]] = None,
++    input_channels: Dict[NNCFNodeName, int] = None,
++    output_channels: Dict[NNCFNodeName, int] = None,
++    kernel_sizes: Dict[NNCFNodeName, Tuple[int, int]] = None,
++    op_addresses_to_skip: List[NNCFNodeName] = None,
++) -> Tuple[Dict[NNCFNodeName, int], Dict[NNCFNodeName, int]]:
++    """
++    Counts the number weights and FLOPs per node in the model for convolution, fully connected and matrix product layers.
++
++    :param graph: NNCFGraph.
++    :param output_shapes: Dictionary of output dimension shapes for convolutions and
++        fully connected layers. E.g {node_name: (height, width)}
++    :param conv_op_metatypes: List of metatypes defining convolution operations.
++    :param linear_op_metatypes: List of metatypes defining linear/fully connected operations.
++    :param matmul_op_metatypes: List of metatypes defining matrix product operations.
++    :param input_channels: Dictionary of input channels number in convolutions.
++        If not specified, taken from the graph. {node_name: channels_num}
++    :param output_channels: Dictionary of output channels number in convolutions.
++        If not specified, taken from the graph. {node_name: channels_num}
++    :param kernel_sizes: Dictionary of kernel sizes in convolutions.
++        If not specified, taken from the graph. {node_name: kernel_size}. It's only supposed to be used in NAS in case
++        of Elastic Kernel enabled.
++    :param op_addresses_to_skip: List of operation addresses of layers that should be skipped from calculation.
++        It's only supposed to be used in NAS in case of Elastic Depth enabled.
++    :return Dictionary of FLOPs number {node_name: flops_num}
++            Dictionary of weights number {node_name: weights_num}
++    """
++    flops = {}
++    weights = {}
++    input_channels = input_channels or {}
++    output_channels = output_channels or {}
++    kernel_sizes = kernel_sizes or {}
++    op_addresses_to_skip = op_addresses_to_skip or []
++    for node in graph.get_nodes_by_metatypes(conv_op_metatypes):
++        name = node.node_name
++        if name in op_addresses_to_skip:
++            continue
++        num_in_channels = input_channels.get(name, node.layer_attributes.in_channels)
++        num_out_channels = output_channels.get(name, node.layer_attributes.out_channels)
++        kernel_size = kernel_sizes.get(name, node.layer_attributes.kernel_size)
++        if is_prunable_depthwise_conv(node):
++            # Prunable depthwise conv processed in special way
++            # because common way to calculate filters per
++            # channel for such layer leads to zero in case
++            # some of the output channels are pruned.
++            filters_per_channel = 1
++        else:
++            filters_per_channel = num_out_channels // node.layer_attributes.groups
++
++        flops_numpy = 2 * np.prod(kernel_size) * num_in_channels * filters_per_channel * np.prod(output_shapes[name])
++        weights_numpy = np.prod(kernel_size) * num_in_channels * filters_per_channel
++        flops[name] = flops_numpy.astype(int).item()
++        weights[name] = weights_numpy.astype(int).item()
++
++    for node in graph.get_nodes_by_metatypes(linear_op_metatypes):
++        name = node.node_name
++        if name in op_addresses_to_skip:
++            continue
++        input_shape = graph.get_input_shapes_for_node(name)
++        output_shape = graph.get_output_shapes_for_node(name)
++        assert len(input_shape) == 1  # and len(output_shape) == 1
++
++        input_key = list(input_shape.keys())[0]
++
++        if node.node_type == "linear":
++            num_in_features = input_channels.get(name, node.layer_attributes.in_features)
++            num_out_features = output_channels.get(name, node.layer_attributes.out_features)
++            weights_numpy = num_in_features * num_out_features
++        elif node.node_type == "addmm":  # check elastic width
++            num_in_features = input_shape[input_key][-1]
++            num_out_features = output_shape[0][-1]
++            weights_numpy = 0
++
++        flops_numpy = 2 * np.prod(input_shape[input_key][:-1]) * num_in_features * num_out_features
++
++        flops[name] = flops_numpy
++        weights[name] = weights_numpy
++
++    if matmul_op_metatypes is not None:
++        for node in graph.get_nodes_by_metatypes(matmul_op_metatypes):
++            name = node.node_name
++            if name in op_addresses_to_skip:
++                continue
++            input_shape = graph.get_input_shapes_for_node(name)
++            assert len(input_shape) == 2
++            input_1_shape, input_2_shape = input_shape.values()
++            # get previous node
++            # force update for bert
++            num_heads = None
++            if name.startswith("Bert") or name.startswith("ViT"):
++                last_name = name.split("/")[-1]
++                if last_name == "matmul_0":
++                    input_fc_name = name.replace(last_name, "NNCFLinear[query]/linear_0")
++                    num_heads = output_channels[input_fc_name] // input_1_shape[-1]
++                elif last_name == "matmul_1":
++                    input_fc_name = name.replace(last_name, "NNCFLinear[value]/linear_0")
++                    num_heads = output_channels[input_fc_name] // input_2_shape[-1]
++                else:
++                    import pdb
++
++                    pdb.set_trace()
++            num_in_features = input_1_shape[-1]
++            num_out_features = input_2_shape[-1]
++
++            # previous_nodes = graph.get_previous_nodes(node)
++            if num_heads:
++                flops_numpy = 2 * input_1_shape[0] * num_heads * input_1_shape[2] * num_in_features * num_out_features
++            else:
++                flops_numpy = 2 * np.prod(input_1_shape[:-1]) * num_in_features * num_out_features
++
++            flops[name] = flops_numpy
++            weights[name] = 0
++
++    return flops, weights
+diff --git a/tests/torch/nas/creators.py b/tests/torch/nas/creators.py
+index 42dd0f36..d77b8237 100644
+--- a/tests/torch/nas/creators.py
++++ b/tests/torch/nas/creators.py
+@@ -144,10 +144,10 @@ def create_single_conv_kernel_supernet(
+     return multi_elasticity_handler.kernel_handler, supernet
+ 
+ 
+-def create_two_conv_width_supernet(elasticity_params=None):
++def create_two_conv_width_supernet(elasticity_params=None, model=TwoConvModel):
+     params = {"available_elasticity_dims": [ElasticityDim.WIDTH.value]}
+     if elasticity_params is not None:
+         params.update(elasticity_params)
+-    multi_elasticity_handler, supernet = create_supernet(TwoConvModel, TwoConvModel.INPUT_SIZE, params)
++    multi_elasticity_handler, supernet = create_supernet(model, model.INPUT_SIZE, params)
+     move_model_to_cuda_if_available(supernet)
+     return multi_elasticity_handler.width_handler, supernet
+diff --git a/tests/torch/nas/models/synthetic.py b/tests/torch/nas/models/synthetic.py
+index c1c03e47..38aff0d3 100644
+--- a/tests/torch/nas/models/synthetic.py
++++ b/tests/torch/nas/models/synthetic.py
+@@ -386,3 +386,18 @@ class TwoSequentialFcLNTestModel(nn.Module):
+         x = self.fc2(x)
+         x = self.ln2(x)
+         return x
++
++
++class TwoConvMeanModel(nn.Module):
++    INPUT_SIZE = [1, 1, 10, 10]
++
++    def __init__(self, in_channels=1, out_channels=3, kernel_size=5, weight_init=1, bias_init=0):
++        super().__init__()
++        self.conv1 = create_conv(in_channels, out_channels, kernel_size, weight_init, bias_init)
++        self.last_conv = create_conv(out_channels, 3, 1)
++
++    def forward(self, x):
++        x = self.conv1(x)
++        x = x.mean(2, keepdim=True).mean(3, keepdim=True)
++        x = self.last_conv(x)
++        return x
+diff --git a/tests/torch/nas/test_elastic_width.py b/tests/torch/nas/test_elastic_width.py
+index 3cedeaf4..b22ce404 100644
+--- a/tests/torch/nas/test_elastic_width.py
++++ b/tests/torch/nas/test_elastic_width.py
+@@ -26,6 +26,7 @@ from tests.torch.nas.helpers import compare_tensors_ignoring_the_order
+ from tests.torch.nas.helpers import move_model_to_cuda_if_available
+ from tests.torch.nas.models.synthetic import ConvTwoFcTestModel
+ from tests.torch.nas.models.synthetic import TwoConvAddConvTestModel
++from tests.torch.nas.models.synthetic import TwoConvMeanModel
+ from tests.torch.nas.models.synthetic import TwoSequentialConvBNTestModel
+ from tests.torch.nas.models.synthetic import TwoSequentialFcLNTestModel
+ from tests.torch.nas.test_all_elasticity import NAS_MODELS_SCOPE
+@@ -71,6 +72,21 @@ def test_set_elastic_width_by_value_not_from_list():
+         width_handler.activate_subnet_for_config({0: 16})
+ 
+ 
++def test_add_dynamic_inputs():
++    elasticity_params = {
++        "width": {
++            "overwrite_groups": [["TwoConvMeanModel/NNCFConv2d[conv1]/conv2d_0"]],
++            "overwrite_groups_widths": [[3, 1]],
++            "add_dynamic_inputs": ["TwoConvMeanModel/NNCFConv2d[last_conv]/conv2d_0"],
++        }
++    }
++    width_handler, _ = create_two_conv_width_supernet(elasticity_params=elasticity_params, model=TwoConvMeanModel)
++    width_handler.activate_minimum_subnet()
++    input_channel, output_channel = width_handler.get_active_in_out_width_values()
++    assert input_channel["TwoConvMeanModel/NNCFConv2d[last_conv]/conv2d_0"] == 1
++    assert output_channel["TwoConvMeanModel/NNCFConv2d[conv1]/conv2d_0"] == 1
++
++
+ ###########################
+ # Output checking
+ ###########################
+diff --git a/tests/torch/nas/test_search.py b/tests/torch/nas/test_search.py
+index d35b6d71..0d429b5c 100644
+--- a/tests/torch/nas/test_search.py
++++ b/tests/torch/nas/test_search.py
+@@ -26,9 +26,19 @@ from tests.torch.nas.creators import create_bootstrap_training_model_and_ctrl
+ from tests.torch.nas.models.synthetic import ThreeConvModel
+ from tests.torch.nas.test_all_elasticity import fixture_nas_model_name  # pylint: disable=unused-import
+ 
++SEARCH_ALGORITHMS = [
++    'NSGA2',
++    'RNSGA2'
++]
++
++@pytest.fixture(name='search_algo_name', scope='function', params=SEARCH_ALGORITHMS)
++def fixture_search_algo_name(request):
++    return request.param
++
+ 
+ class SearchTestDesc(NamedTuple):
+     model_creator: Any
++    # ref_model_stats: RefModelStats = None
+     blocks_to_skip: List[List[str]] = None
+     input_sizes: List[int] = [1, 3, 32, 32]
+     algo_params: Dict = {}
+@@ -66,7 +76,7 @@ def prepare_test_model(search_desc):
+     return model, elasticity_ctrl, nncf_config
+ 
+ 
+-def prepare_search_algorithm(nas_model_name: str):
++def prepare_search_algorithm(nas_model_name, search_algo_name):
+     if "inception_v3" in nas_model_name:
+         pytest.skip(
+             f"Skip test for {nas_model_name} as it fails because of 2 issues: "
+@@ -80,7 +90,7 @@ def prepare_search_algorithm(nas_model_name: str):
+     nncf_config = get_empty_config(input_sample_sizes=NAS_MODEL_DESCS[nas_model_name][1])
+     nncf_config["bootstrapNAS"] = {"training": {"algorithm": "progressive_shrinking"}}
+     nncf_config["input_info"][0].update({"filler": "random"})
+-    nncf_config["bootstrapNAS"]["search"] = {"algorithm": "NSGA2", "num_evals": 2, "population": 1}
++    nncf_config["bootstrapNAS"]["search"] = {"algorithm": search_algo_name, "num_evals": 2, "population": 1}
+     nncf_config = NNCFConfig.from_dict(nncf_config)
+     model, ctrl = create_bootstrap_training_model_and_ctrl(model, nncf_config)
+     elasticity_ctrl = ctrl.elasticity_controller
+@@ -152,8 +162,8 @@ class TestSearchAlgorithm:
+         elasticity_ctrl.multi_elasticity_handler.activate_maximum_subnet()
+         assert config_init == elasticity_ctrl.multi_elasticity_handler.get_active_config()
+ 
+-    def test_design_upper_bounds(self, nas_model_name):
+-        search = prepare_search_algorithm(nas_model_name)
++    def test_design_upper_bounds(self, nas_model_name, search_algo_name):
++        search = prepare_search_algorithm(nas_model_name, search_algo_name)
+         assert search.vars_upper == NAS_MODELS_SEARCH_ENCODING[nas_model_name]
+         assert search.num_vars == len(NAS_MODELS_SEARCH_ENCODING[nas_model_name])
+ 
+@@ -187,10 +197,10 @@ class TestSearchAlgorithm:
+ 
+ 
+ class TestSearchEvaluators:
+-    def test_create_default_evaluators(self, nas_model_name, tmp_path):
++    def test_create_default_evaluators(self, nas_model_name, search_algo_name, tmp_path):
+         if nas_model_name in ["squeezenet1_0", "pnasnetb"]:
+             pytest.skip(f"Skip test for {nas_model_name} as it fails.")
+-        search = prepare_search_algorithm(nas_model_name)
++        search = prepare_search_algorithm(nas_model_name, search_algo_name)
+         search.run(lambda model, val_loader: 0, None, tmp_path)
+         evaluators = search.evaluator_handlers
+         assert len(evaluators) == 2
