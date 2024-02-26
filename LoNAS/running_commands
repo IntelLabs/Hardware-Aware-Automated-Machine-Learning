@@ -1,0 +1,105 @@
+#######################################
+Unified Math 10k (math_10k.json)
+#######################################
+
+# LLaMA-7B-LoNAS
+CUDA_VISIBLE_DEVICES=${DEVICES} python run_math.py \
+  --dataset_path datasets/math_10k.json \
+  --model_name_or_path yahma/llama-7b-hf \
+  --do_train \
+  --do_test \
+  --per_device_train_batch_size 4 \
+  --gradient_accumulation_steps 4 \
+  --num_train_epochs 7 \
+  --warmup_steps 100 \
+  --optim adamw_torch \
+  --fp16 \
+  --output_dir ./trained_super_adapter/unified_math_10k/llama-7b-lonas/ \
+  --logging_steps 20 \
+  --save_strategy epoch \
+  --save_total_limit 2 \
+  --val_set_size 0 \
+  --lora \
+  --lora_r 32 \
+  --lora_alpha 64 \
+  --lora_dropout 0.1 \
+  --target_modules q_proj,k_proj,v_proj,up_proj,gate_proj,down_proj \
+  --nncf_config nncf_config/unified_math_10k/nncf_lonas_llama_7b.json
+
+# LLaMA-13B-LoNAS
+CUDA_VISIBLE_DEVICES=${DEVICES} python run_math.py \
+  --dataset_path datasets/math_10k.json \
+  --model_name_or_path yahma/llama-13b-hf \
+  --do_train \
+  --do_test \
+  --per_device_train_batch_size 4 \
+  --gradient_accumulation_steps 4 \
+  --num_train_epochs 6 \
+  --warmup_steps 100 \
+  --optim adamw_torch \
+  --fp16 \
+  --output_dir ./trained_super_adapter/unified_math_10k/llama-13b-lonas/ \
+  --logging_steps 20 \
+  --save_strategy epoch \
+  --save_total_limit 2 \
+  --val_set_size 0 \
+  --lora \
+  --lora_r 32 \
+  --lora_alpha 64 \
+  --lora_dropout 0.1 \
+  --target_modules q_proj,k_proj,v_proj,up_proj,down_proj \
+  --nncf_config nncf_config/unified_math_10k/nncf_lonas_llama_13b.json
+
+# BLOOMz-7B-LoNAS
+CUDA_VISIBLE_DEVICES=${DEVICES} python run_math.py \
+  --dataset_path datasets/math_10k.json \
+  --model_name_or_path bigscience/bloomz-7b1 \
+  --do_train \
+  --do_test \
+  --per_device_train_batch_size 4 \
+  --gradient_accumulation_steps 4 \
+  --num_train_epochs 8 \
+  --warmup_steps 100 \
+  --optim adamw_torch \
+  --fp16 \
+  --output_dir ./trained_super_adapter/unified_math_10k/bloomz-7b-lonas/ \
+  --logging_steps 20 \
+  --evaluation_strategy epoch \
+  --save_strategy epoch \
+  --save_total_limit 2 \
+  --val_set_size 0 \
+  --lora \
+  --lora_r 32 \
+  --lora_alpha 64 \
+  --lora_dropout 0.1 \
+  --target_modules query_key_value,dense_h_to_4h,dense_4h_to_h \
+  --nncf_config nncf_config/unified_math_10k/nncf_lonas_bloomz_7b.json
+
+
+##############################################
+Unified Commonsense 15k (commonsense_15k.json)
+##############################################
+
+# LLaMA-7B-LoNAS
+CUDA_VISIBLE_DEVICES=${DEVICES} python run_commonsense.py \
+  --dataset_path datasets/commonsense_15k.json \
+  --model_name_or_path yahma/llama-7b-hf \
+  --do_train \
+  --do_test \
+  --per_device_train_batch_size 4 \
+  --gradient_accumulation_steps 4 \
+  --num_train_epochs 6 \
+  --warmup_steps 100 \
+  --optim adamw_torch \
+  --fp16 \
+  --output_dir ./trained_super_adapter/unified_commonsense/llama-7b-lonas/ \
+  --logging_steps 20 \
+  --save_strategy epoch \
+  --save_total_limit 2 \
+  --val_set_size 0 \
+  --lora \
+  --lora_r 32 \
+  --lora_alpha 64 \
+  --lora_dropout 0.1 \
+  --target_modules q_proj,k_proj,v_proj,up_proj,gate_proj,down_proj \
+  --nncf_config nncf_config/unified_commonsense/nncf_lonas_llama_7b.json
