@@ -50,7 +50,7 @@ The models we use for experiment:
 
 ### Dataset Preparation
 
-For the unified training setup, the training and test datasets can be downloaded from [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters).
+The training and test datasets can be downloaded from [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters).
 We place them into the directory `datasets/`.
 
 ```
