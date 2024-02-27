@@ -12,9 +12,7 @@ BootstrapNAS automates the generation of weight-sharing super-networks using the
 
 ### [LoNAS: Elastic Low-Rank Adapters for Efficient Large Language Models](./LoNAS/README.md) 
 
-Initial exploration of using NAS on large language models by exploring a search space of elastic low-rank adapters
-while reducing memory and compute requirements of full-scale NAS, resulting in high-performing compressed models obtained from
-weight-sharing super-networks. We investigate the benefits and limitations of this method, motivating follow-up work.
+Initial exploration of using weight-sharing NAS for the compression of large language models. We explore a search space of elastic low-rank adapters while reducing full-scale NAS's memory and compute requirements. This results in high-performing compressed models obtained from weight-sharing super-networks. We investigate the benefits and limitations of this method, motivating follow-up work.
 
 ### [EFTNAS: Searching for Efficient Language Models in First-Order Weight-Reordered Super-Networks](./EFTNAS/README.md)
 
