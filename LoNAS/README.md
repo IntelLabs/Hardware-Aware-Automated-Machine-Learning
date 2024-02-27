@@ -7,10 +7,10 @@ Step 1: Create a new conda environment
 conda create -n lonas python=3.10
 conda activate lonas
 ```
-Step 2: Install relevant packages
+Step 2: Install required packages
 ```
 # Pytorch
-pip install torch==1.12.1+cu113 -f https://download.pytorch.org/whl/torch_stable.html
+pip install torch==2.0.1
 
 mkdir third_party && cd third_party
 
