@@ -10,6 +10,12 @@ EZNAS is a genetic programming-driven methodology for automatically discovering 
 
 BootstrapNAS automates the generation of weight-sharing super-networks using the Neural Network Compression Framework (NNCF). 
 
+### [LoNAS: Elastic Low-Rank Adapters for Efficient Large Language Models](./LoNAS/README.md) 
+
+Initial exploration of using NAS on large language models by exploring a search space of elastic low-rank adapters
+while reducing memory and compute requirements of full-scale NAS, resulting in high-performing compressed models obtained from
+weight-sharing super-networks. We investigate the benefits and limitations of this method, motivating follow-up work.
+
 ### [EFTNAS: Searching for Efficient Language Models in First-Order Weight-Reordered Super-Networks](./EFTNAS/README.md)
 
 Integrating neural architecture search (NAS) and network pruning techniques, we effectively generate and train

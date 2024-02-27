@@ -219,11 +219,9 @@ CUDA_VISIBLE_DEVICES=${DEVICES} torchrun --nproc_per_node=2 --master_port ${MAST
 
 # Citation
 
-If you use the code or data in your research, please use the following BibTex entry:
-
 ```
 @inproceedings{
-munoz2024eftnas,
+eftnas2024,
 title={Searching for Efficient Language Models in First-Order Weight-Reordered Super-Networks},
 author={J. Pablo Munoz and Yi Zheng and Nilesh Jain},
 booktitle={The 2024 Joint International Conference on Computational Linguistics, Language Resources and Evaluation},

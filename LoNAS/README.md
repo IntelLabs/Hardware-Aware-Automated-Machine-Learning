@@ -120,3 +120,17 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_math.py \
     --lora_weights trained_super_adapter/unified_math_10k/lonas-llama-7b \
     --nncf_config nncf_config/unified_math_10k/nncf_lonas_llama_7b.json
 ```
+
+
+# Citation
+
+```
+@inproceedings{
+lonas2024,
+title={LoNAS: Elastic Low-Rank Adapters for Efficient Large Language Models},
+author={J. Pablo Munoz and Jinjie Yuan and Yi Zheng and Nilesh Jain},
+booktitle={The 2024 Joint International Conference on Computational Linguistics, Language Resources and Evaluation},
+year={2024},
+url={}
+}
+```
