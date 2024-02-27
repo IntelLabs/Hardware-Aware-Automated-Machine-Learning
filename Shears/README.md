@@ -1,4 +1,4 @@
-# Shears
+# Shears: Unstructured Sparsity with Neural Low-rank Adapter Search
 
 PyTorch implementation of Shears.
 
