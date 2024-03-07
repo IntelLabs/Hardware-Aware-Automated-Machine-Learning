@@ -1,4 +1,14 @@
 # EFTNAS
+<p align="center">
+<img src="./figures/eftnas_pipeline.png" alt="EFTNAS Pipeline" width="600"/>
+</p>
+
+Unstructured weight importance information is used to obtain
+subnetwork configurations at the boundaries of the desired search space. Then, intermediate subnetworks
+are identified depending on the required complexity for the search space, and all subnetwork configurations
+are combined, effectively automating the search space generation based on the desired computation
+complexity. Weights are then reordered, elasticity is enabled, and the super-network is trained. Finally,
+high-performing Transformer-based subnetworks are discovered for a variety of performance targets.
 
 ## Env Setup
 
@@ -23,7 +33,7 @@ pip install -r examples/pytorch/text-classification/requirements.txt
 ```
 
 ## EFTNAS Results
-eftnas_results
+
 - BERT: {Subnet version}_{task}
     - Subnetwork version: S1 for EFTNAS-S1, S2 for EFTNAS-S2
     - task: datasets in GLUE benchmark, SQuADv1, SQuADv2
@@ -229,3 +239,26 @@ year={2024},
 url={}
 }
 ```
+
+# Results on the GLUE Benchmark 
+
+
+| Model                                 | GFLOPs    | GLUE Avg.     | MNLI-m   | QNLI | QQP      | SST-2    | CoLA     | MRPC     | RTE  |
+|---------------------------------------|-----------|---------------|----------|------|----------|----------|----------|----------|------|
+| **Development Set**                   |
+| BERT<sub>base</sub> (teacher)         | 11.2      | 83.3          | 84.7     | 91.8 | 91.0     | 93.2     | 59.6     | 90.4     | 72.5 |
+| DistilBERT<sub>6</sub>                | 5.7       | 78.6          | 82.2     | 89.2 | 88.5     | 91.3     | 51.3     | 87.5     | 59.9 |
+| TinyBERT<sub>6</sub>                  | 5.7       | 81.9          | 84.5     | 91.1 | 91.1     | 93.0     | 54.0     | 90.6     | 73.4 |
+| MiniLM                                | 5.7       | 81.0          | 84.0     | 91.0 | 91.0     | 92.0     | 49.2     | 88.4     | 71.5 |
+| MiniLMv2 (6x768)                      | 5.7       | 81.7          | 84.2     | 90.8 | 91.1     | 92.4     | 52.5     | 88.9     | 72.1 |
+| \rowcolor{lightgray} EFTNAS-S1 (Ours) | 5.7       | **82.9**      | **84.6** | 90.8 | **91.2** | **93.5** | **60.6** | **90.8** | 69.0 |
+| NAS-BERT<sub>10</sub> + KD            | 2.3       | 74.2          | 76.4     | 86.3 | 88.5     | 88.6     | 34.0     | 79.1     | 66.6 |
+| AutoDistil<sub>Proxy-S</sub>          | 2.0       | 79.9          | 83.2     | 90.0 | 90.6     | 90.1     | 48.3     | 88.3     | 69.4 |
+| AutoDistil<sub>Agnostic</sub>         | 2.1       | 79.6          | 82.8     | 89.9 | 90.8     | 90.6     | 47.1     | 87.3     | 69.0 |
+| **Test Set**                          |
+| $\mathrm{BERT_{base}}$ (teacher)      | 11.2      | 78.2          | 84.6     | 90.5 | 71.2     | 93.5     | 52.1     | 88.9     | 66.4 |
+| $\mathrm{DistilBERT_6}$               | 5.7       | 76.8          | 82.6     | 88.9 | 70.1     | 92.5     | 49.0     | 86.9     | 58.4 |
+| $\mathrm{TinyBERT_6 \dagger}$         | 5.7       | 79.4          | 84.6     | 90.4 | 71.6     | 93.1     | 51.1     | 87.3     | 70.0 |
+| $\mathrm{MiniLMv2} (6 \times 768)$    | 5.7       | 77.5          | 83.8     | 90.2 | 70.9     | 92.9     | 46.6     | 89.1     | 69.2 |
+| \rowcolor{lightgray} EFTNAS-S1 (Ours) | 5.7       | 77.7          | 83.7     | 89.9 | **71.8** | **93.4** | **52.6** | 87.6     | 65.0 |
+| \rowcolor{lightgray} EFNAS-S2 (Ours)  | 2.2       | 75.2          | 82.0     | 87.8 | 70.6     | 91.4     | 44.5     | 86.1     | 64.0 |
