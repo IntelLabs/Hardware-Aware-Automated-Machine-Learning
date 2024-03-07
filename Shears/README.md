@@ -52,7 +52,7 @@ Denote the path to the downloaded model as `SHEARS_PATH`.
 
 Below is an example to generate the instruction-following responses for some math reasoning samples:
 ```bash
-CUDA_VISIBLE_DEVICES=$DEVICES python example_math.py --model_path $SHEARS_PATH
+CUDA_VISIBLE_DEVICES=$DEVICES python example.py --model_path $SHEARS_PATH
 ```
 
 ### Training
@@ -89,7 +89,7 @@ Taking the unified math reasoning training as an example, please download the 10
 Example command to train the super-adapter of the pruned LLaMA-7B using Shears:
 
 ```bash
-CUDA_VISIBLE_DEVICES=${DEVICES} python run_math.py \
+CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
     --dataset_path $DATA_PATH/math_10k.json \
     --model_name_or_path unstructured_sparsity_models/llama-7b-sparsity50 \
     --do_train \
