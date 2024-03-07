@@ -1,0 +1,343 @@
+diff --git a/src/transformers/modeling_utils.py b/src/transformers/modeling_utils.py
+index 45459ed22..b475565cd 100644
+--- a/src/transformers/modeling_utils.py
++++ b/src/transformers/modeling_utils.py
+@@ -56,6 +56,7 @@ from .utils import (
+     TF_WEIGHTS_NAME,
+     WEIGHTS_INDEX_NAME,
+     WEIGHTS_NAME,
++    NNCF_PT_STATE_NAME,
+     ContextManagers,
+     ModelOutput,
+     PushToHubMixin,
+@@ -1660,6 +1661,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+         push_to_hub: bool = False,
+         max_shard_size: Union[int, str] = "10GB",
+         safe_serialization: bool = False,
++        nncf_compression_state: Dict = None,
+         variant: Optional[str] = None,
+         **kwargs,
+     ):
+@@ -1698,6 +1700,8 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+ 
+             safe_serialization (`bool`, *optional*, defaults to `False`):
+                 Whether to save the model using `safetensors` or the traditional PyTorch way (that uses `pickle`).
++            nncf_compression_state (`Dict`, *optional*):
++                If specified, nncf_compression_state are saved in nncf_state.bin.
+             variant (`str`, *optional*):
+                 If specified, weights are saved in the format pytorch_model.<variant>.bin.
+             kwargs (`Dict[str, Any]`, *optional*):
+@@ -1846,6 +1850,10 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+             else:
+                 save_function(shard, os.path.join(save_directory, shard_file))
+ 
++        if nncf_compression_state is not None:
++            nncf_state_output_file = os.path.join(save_directory, NNCF_PT_STATE_NAME)
++            save_function(nncf_compression_state, nncf_state_output_file)
++
+         if index is None:
+             path_to_weights = os.path.join(save_directory, _add_variant(WEIGHTS_NAME, variant))
+             logger.info(f"Model weights saved in {path_to_weights}")
+diff --git a/src/transformers/trainer.py b/src/transformers/trainer.py
+index 8ed88d931..059439266 100755
+--- a/src/transformers/trainer.py
++++ b/src/transformers/trainer.py
+@@ -51,6 +51,9 @@ from huggingface_hub import Repository, create_repo
+ from packaging import version
+ from torch import nn
+ from torch.utils.data import DataLoader, Dataset, RandomSampler, SequentialSampler
++from nncf.torch.nncf_network import NNCFNetwork
++from nncf.torch.compression_method_api import PTCompressionAlgorithmController
++from nncf.common.utils.tensorboard import prepare_for_tensorboard
+ 
+ from . import __version__
+ from .configuration_utils import PretrainedConfig
+@@ -222,6 +225,30 @@ SCHEDULER_NAME = "scheduler.pt"
+ SCALER_NAME = "scaler.pt"
+ 
+ 
++def get_train_dataloader_for_init(args, train_dataset, data_collator=None):
++    from torch.utils.data import RandomSampler
++    from torch.utils.data import DistributedSampler
++    train_sampler = (
++        RandomSampler(train_dataset)
++        if args.local_rank in [-1, 0]
++        else DistributedSampler(train_dataset)
++    )
++
++    if data_collator is None:
++        from transformers.data.data_collator import default_data_collator
++        data_collator = default_data_collator
++
++    from torch.utils.data import DataLoader
++    data_loader = DataLoader(
++        train_dataset,
++        batch_size=args.train_batch_size,
++        sampler=train_sampler,
++        collate_fn=data_collator,
++        drop_last=args.dataloader_drop_last,
++    )
++    return data_loader
++
++
+ class Trainer:
+     """
+     Trainer is a simple but feature-complete training and eval loop for PyTorch, optimized for 🤗 Transformers.
+@@ -286,6 +313,8 @@ class Trainer:
+             by this function will be reflected in the predictions received by `compute_metrics`.
+ 
+             Note that the labels (second parameter) will be `None` if the dataset does not have them.
++        compression_ctrl ([`PTCompressionAlgorithmController`], *optional*): A compression controller to use. Note that 
++            this script only supports `ProgressiveShrinkingController`.
+ 
+     Important attributes:
+ 
+@@ -321,12 +350,14 @@ class Trainer:
+         callbacks: Optional[List[TrainerCallback]] = None,
+         optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = (None, None),
+         preprocess_logits_for_metrics: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
++        compression_ctrl: PTCompressionAlgorithmController = None
+     ):
+         if args is None:
+             output_dir = "tmp_trainer"
+             logger.info(f"No `TrainingArguments` passed, using `output_dir={output_dir}`.")
+             args = TrainingArguments(output_dir=output_dir)
+         self.args = args
++        self.compression_ctrl = compression_ctrl
+         # Seed must be set before instantiating the model when using model
+         enable_full_determinism(self.args.seed) if self.args.full_determinism else set_seed(self.args.seed)
+         self.hp_name = None
+@@ -955,7 +986,9 @@ class Trainer:
+             optimizer = self.optimizer.optimizer
+         else:
+             optimizer = self.optimizer
+-        self.create_scheduler(num_training_steps=num_training_steps, optimizer=optimizer)
++        # compression_ctrl (`ProgressiveShrinkingController`) has own scheduler, so here it's no need to create a scheduler.
++        if self.compression_ctrl is None:
++            self.create_scheduler(num_training_steps=num_training_steps, optimizer=optimizer)
+ 
+     def create_optimizer(self):
+         """
+@@ -1449,6 +1482,9 @@ class Trainer:
+ 
+             if self.args.ddp_bucket_cap_mb is not None:
+                 kwargs["bucket_cap_mb"] = self.args.ddp_bucket_cap_mb
++                
++            if self.compression_ctrl is not None:
++                self.compression_ctrl.distributed()
+ 
+             if self.args.ddp_broadcast_buffers is not None:
+                 kwargs["broadcast_buffers"] = self.args.ddp_broadcast_buffers
+@@ -1757,8 +1793,16 @@ class Trainer:
+                 for _ in train_dataloader:
+                     break
+ 
++        # init LRScheduler
++        if self.compression_ctrl is not None:
++            train_iters = len(train_dataloader)
++            self.compression_ctrl.set_training_lr_scheduler_args(self.optimizer, train_iters)
++        
+         total_batched_samples = 0
+         for epoch in range(epochs_trained, num_train_epochs):
++            if self.compression_ctrl is not None:
++                self.compression_ctrl.scheduler.epoch_step()
++                
+             epoch_iterator = train_dataloader
+ 
+             # Reset the past mems state at the beginning of each epoch if necessary.
+@@ -1785,6 +1829,9 @@ class Trainer:
+ 
+             step = -1
+             for step, inputs in enumerate(epoch_iterator):
++                if self.compression_ctrl is not None:
++                    self.compression_ctrl.scheduler.step()
++                    
+                 total_batched_samples += 1
+                 if rng_to_sync:
+                     self._load_rng_state(resume_from_checkpoint)
+@@ -1890,12 +1937,14 @@ class Trainer:
+ 
+                     if optimizer_was_run:
+                         # Delay optimizer scheduling until metrics are generated
+-                        if not isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
++                        if not isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau) \
++                                and self.compression_ctrl is None:
+                             self.lr_scheduler.step()
+ 
+                     model.zero_grad()
+                     self.state.global_step += 1
+                     self.state.epoch = epoch + (step + 1 + steps_skipped) / steps_in_epoch
++                    self.state.curr_loss = tr_loss_step.cpu().detach().item()
+                     self.control = self.callback_handler.on_step_end(args, self.state, self.control)
+ 
+                     self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval)
+@@ -2203,7 +2252,16 @@ class Trainer:
+             tr_loss -= tr_loss
+ 
+             logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+-            logs["learning_rate"] = self._get_learning_rate()
++            logs["learning_rate"] = self.compression_ctrl.scheduler.lr_scheduler.get_last_lr()[0] \
++                if self.compression_ctrl is not None else self._get_learning_rate()
++            
++            # log compression loss
++            if self.compression_ctrl is not None:
++                logs["compression_loss"] = self.compression_ctrl.loss().item()
++                compression_stats = self.compression_ctrl.statistics()
++                for key, value in prepare_for_tensorboard(compression_stats).items():
++                    logs["compression/statistics/{0}".format(key)] = value
++                print(compression_stats.to_str())
+ 
+             self._total_loss_scalar += tr_loss_scalar
+             self._globalstep_last_logged = self.state.global_step
+@@ -2342,7 +2400,8 @@ class Trainer:
+                 torch.save(self.optimizer.state_dict(), os.path.join(output_dir, OPTIMIZER_NAME))
+ 
+             with warnings.catch_warnings(record=True) as caught_warnings:
+-                torch.save(self.lr_scheduler.state_dict(), os.path.join(output_dir, SCHEDULER_NAME))
++                if self.compression_ctrl is None:
++                    torch.save(self.lr_scheduler.state_dict(), os.path.join(output_dir, SCHEDULER_NAME))
+             reissue_pt_warnings(caught_warnings)
+             if self.do_grad_scaling:
+                 torch.save(self.scaler.state_dict(), os.path.join(output_dir, SCALER_NAME))
+@@ -2652,9 +2711,15 @@ class Trainer:
+ 
+         with self.compute_loss_context_manager():
+             loss = self.compute_loss(model, inputs)
++            # compression loss (e.g., knowledge distillation loss) 
++            if self.compression_ctrl is not None:
++                compression_loss = self.compression_ctrl.loss()
+ 
+         if self.args.n_gpu > 1:
+             loss = loss.mean()  # mean() to average on multi-gpu parallel training
++        
++        if self.compression_ctrl is not None:
++            loss += compression_loss
+ 
+         if self.do_grad_scaling:
+             self.scaler.scale(loss).backward()
+@@ -2928,30 +2993,47 @@ class Trainer:
+         self._memory_tracker.start()
+ 
+         eval_dataloader = self.get_eval_dataloader(eval_dataset)
+-        start_time = time.time()
+ 
+         eval_loop = self.prediction_loop if self.args.use_legacy_prediction_loop else self.evaluation_loop
+-        output = eval_loop(
+-            eval_dataloader,
+-            description="Evaluation",
+-            # No point gathering the predictions if there are no metrics, otherwise we defer to
+-            # self.args.prediction_loss_only
+-            prediction_loss_only=True if self.compute_metrics is None else None,
+-            ignore_keys=ignore_keys,
+-            metric_key_prefix=metric_key_prefix,
+-        )
+-
+-        total_batch_size = self.args.eval_batch_size * self.args.world_size
+-        if f"{metric_key_prefix}_jit_compilation_time" in output.metrics:
+-            start_time += output.metrics[f"{metric_key_prefix}_jit_compilation_time"]
+-        output.metrics.update(
+-            speed_metrics(
+-                metric_key_prefix,
+-                start_time,
+-                num_samples=output.num_samples,
+-                num_steps=math.ceil(output.num_samples / total_batch_size),
++        
++        def eval_one_model(description="Evaluation"):
++            start_time = time.time()
++            output = eval_loop(
++                eval_dataloader,
++                description=description,
++                # No point gathering the predictions if there are no metrics, otherwise we defer to
++                # self.args.prediction_loss_only
++                prediction_loss_only=True if self.compute_metrics is None else None,
++                ignore_keys=ignore_keys,
++                metric_key_prefix=metric_key_prefix,
+             )
+-        )
++            total_batch_size = self.args.eval_batch_size * self.args.world_size
++            if f"{metric_key_prefix}_jit_compilation_time" in output.metrics:
++                start_time += output.metrics[f"{metric_key_prefix}_jit_compilation_time"]
++            output.metrics.update(
++                speed_metrics(
++                    metric_key_prefix,
++                    start_time,
++                    num_samples=output.num_samples,
++                    num_steps=math.ceil(output.num_samples / total_batch_size),
++                )
++            )
++            return output
++        
++        if self.compression_ctrl is not None:
++            # evaluate supernet and minium subnet
++            self.compression_ctrl.multi_elasticity_handler.activate_minimum_subnet()
++            minimum_subnet_output = eval_one_model("Evaluation - Minimum subnet")
++            self.compression_ctrl.multi_elasticity_handler.activate_supernet()
++            supernet_output = eval_one_model("Evaluation - Supernet")
++            
++            # merge result
++            metrics = {key + prefix: output.metrics[key]
++                       for prefix, output in zip(["_super", "_minimum"], [supernet_output, minimum_subnet_output])
++                       for key in output.metrics}
++            output = EvalLoopOutput(predictions=None, label_ids=None, metrics=metrics, num_samples=None)
++        else:
++            output = eval_one_model()
+ 
+         self.log(output.metrics)
+ 
+@@ -3034,6 +3116,7 @@ class Trainer:
+         prediction_loss_only: Optional[bool] = None,
+         ignore_keys: Optional[List[str]] = None,
+         metric_key_prefix: str = "eval",
++        model = None
+     ) -> EvalLoopOutput:
+         """
+         Prediction/evaluation loop, shared by `Trainer.evaluate()` and `Trainer.predict()`.
+@@ -3048,7 +3131,10 @@ class Trainer:
+         if self.is_deepspeed_enabled and self.deepspeed is None:
+             _, _ = deepspeed_init(self, num_training_steps=0, inference=True)
+ 
+-        model = self._wrap_model(self.model, training=False, dataloader=dataloader)
++        if model:
++            model = self._wrap_model(model, training=False, dataloader=dataloader)
++        else:
++            model = self._wrap_model(self.model, training=False, dataloader=dataloader)
+ 
+         if len(self.accelerator._models) == 0 and model is self.model:
+             model = (
+diff --git a/src/transformers/training_args.py b/src/transformers/training_args.py
+index 0527b4011..feef5b38d 100644
+--- a/src/transformers/training_args.py
++++ b/src/transformers/training_args.py
+@@ -632,6 +632,10 @@ class TrainingArguments:
+ 
+     do_train: bool = field(default=False, metadata={"help": "Whether to run training."})
+     do_eval: bool = field(default=False, metadata={"help": "Whether to run eval on the dev set."})
++    do_search: bool = field(
++        default=False,
++        metadata={"help": "Whether to run searching on the dev set to find the best subnet (bootstrapnas)."}
++    )
+     do_predict: bool = field(default=False, metadata={"help": "Whether to run predictions on the test set."})
+     evaluation_strategy: Union[IntervalStrategy, str] = field(
+         default="no",
+@@ -1196,6 +1200,9 @@ class TrainingArguments:
+             "choices": ["mpi", "ccl", "gloo"],
+         },
+     )
++    
++    nncf_config: str = field(default=None, metadata={"help": "NNCF configuration .json file for compression-enabled training"})
++    to_onnx: str = field(default=None, metadata={"help": "Name of the ONNX model file to export the model to."})
+ 
+     def __post_init__(self):
+         # expand paths, if not os.makedirs("~/bar") will make directory
+diff --git a/src/transformers/utils/__init__.py b/src/transformers/utils/__init__.py
+index 21430cd5b..724b486a8 100644
+--- a/src/transformers/utils/__init__.py
++++ b/src/transformers/utils/__init__.py
+@@ -180,6 +180,7 @@ from .import_utils import (
+ 
+ WEIGHTS_NAME = "pytorch_model.bin"
+ WEIGHTS_INDEX_NAME = "pytorch_model.bin.index.json"
++NNCF_PT_STATE_NAME = "nncf_state.bin"
+ ADAPTER_CONFIG_NAME = "adapter_config.json"
+ ADAPTER_WEIGHTS_NAME = "adapter_model.bin"
+ ADAPTER_SAFE_WEIGHTS_NAME = "adapter_model.safetensors"

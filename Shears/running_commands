@@ -1,0 +1,285 @@
+# LLaMA with the Unified Math Dataset
+
+# LLaMA-7B (sparsity: 40%)
+
+CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main.py \
+    --model yahma/llama-7b-hf \
+    --prune_method wanda \
+    --sparsity_ratio 0.4 \
+    --sparsity_type unstructured \
+    --save wanda_out \
+    --save_model unstructured_sparsity_models/llama-7b-sparsity40
+
+CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
+    --dataset_path datasets/math_10k.json \
+    --model_name_or_path unstructured_sparsity_models/llama-7b-sparsity40 \
+    --do_train \
+    --do_test \
+    --per_device_train_batch_size 4 \
+    --gradient_accumulation_steps 4 \
+    --num_train_epochs 4 \
+    --warmup_steps 100 \
+    --optim adamw_torch \
+    --fp16 \
+    --output_dir trained_super_adapter/unified_math/llama-7b-sparsity40-shears-math-adapter \
+    --logging_steps 20 \
+    --save_strategy epoch \
+    --save_total_limit 2 \
+    --lora \
+    --lora_r 32 \
+    --lora_alpha 64 \
+    --lora_dropout 0.1 \
+    --target_modules q_proj,k_proj,v_proj,up_proj,gate_proj,down_proj \
+    --nncf_config nncf_config/unified_math/nncf_shears_llama_7b_sparsity40.json
+
+# LLaMA-7B (sparsity: 50%)
+
+CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main.py \
+    --model yahma/llama-7b-hf \
+    --prune_method wanda \
+    --sparsity_ratio 0.5 \
+    --sparsity_type unstructured \
+    --save wanda_out \
+    --save_model unstructured_sparsity_models/llama-7b-sparsity50
+
+CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
+    --dataset_path datasets/math_10k.json \
+    --model_name_or_path unstructured_sparsity_models/llama-7b-sparsity50 \
+    --do_train \
+    --do_test \
+    --per_device_train_batch_size 4 \
+    --gradient_accumulation_steps 4 \
+    --num_train_epochs 3 \
+    --warmup_steps 100 \
+    --optim adamw_torch \
+    --fp16 \
+    --output_dir trained_super_adapter/unified_math/llama-7b-sparsity50-shears-math-adapter \
+    --logging_steps 20 \
+    --save_strategy epoch \
+    --save_total_limit 2 \
+    --lora \
+    --lora_r 32 \
+    --lora_alpha 64 \
+    --lora_dropout 0.1 \
+    --target_modules q_proj,k_proj,v_proj,up_proj,down_proj \
+    --nncf_config nncf_config/unified_math/nncf_shears_llama_7b_sparsity50.json
+
+# LLaMA-13B (sparsity: 40%)
+
+CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main.py \
+    --model yahma/llama-13b-hf \
+    --prune_method wanda \
+    --sparsity_ratio 0.4 \
+    --sparsity_type unstructured \
+    --save wanda_out \
+    --save_model unstructured_sparsity_models/llama-13b-sparsity40
+
+CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
+    --dataset_path datasets/math_10k.json \
+    --model_name_or_path unstructured_sparsity_models/llama-13b-sparsity40 \
+    --do_train \
+    --do_test \
+    --per_device_train_batch_size 4 \
+    --gradient_accumulation_steps 4 \
+    --num_train_epochs 3 \
+    --warmup_steps 100 \
+    --optim adamw_torch \
+    --fp16 \
+    --output_dir trained_super_adapter/unified_math/llama-13b-sparsity40-shears-math-adapter \
+    --logging_steps 20 \
+    --save_strategy epoch \
+    --save_total_limit 2 \
+    --lora \
+    --lora_r 32 \
+    --lora_alpha 64 \
+    --lora_dropout 0.1 \
+    --target_modules q_proj,k_proj,v_proj,up_proj,down_proj \
+    --nncf_config nncf_config/unified_math/nncf_shears_llama_13b_sparsity40.json
+
+# LLaMA-13B (sparsity: 50%)
+
+CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main.py \
+    --model yahma/llama-13b-hf \
+    --prune_method wanda \
+    --sparsity_ratio 0.5 \
+    --sparsity_type unstructured \
+    --save wanda_out \
+    --save_model unstructured_sparsity_models/llama-13b-sparsity50
+
+CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
+    --dataset_path datasets/math_10k.json \
+    --model_name_or_path unstructured_sparsity_models/llama-13b-sparsity50 \
+    --do_train \
+    --do_test \
+    --per_device_train_batch_size 4 \
+    --gradient_accumulation_steps 4 \
+    --num_train_epochs 3 \
+    --warmup_steps 100 \
+    --optim adamw_torch \
+    --fp16 \
+    --output_dir trained_super_adapter/unified_math/llama-13b-sparsity50-shears-math-adapter \
+    --logging_steps 20 \
+    --save_strategy epoch \
+    --save_total_limit 2 \
+    --lora \
+    --lora_r 32 \
+    --lora_alpha 64 \
+    --lora_dropout 0.1 \
+    --target_modules q_proj,k_proj,v_proj,up_proj,down_proj \
+    --nncf_config nncf_config/unified_math/nncf_shears_llama_13b_sparsity50.json
+
+# MPT with GSM8K
+
+# MPT Model preprocessing:
+git clone https://huggingface.co/mosaicml/mpt-7b.git && cd mpt-7b
+git checkout ada218f && pip install -r requirements.txt
+git apply --ignore-space-change --ignore-whitespace ../mpt_process/mpt-7b-modifications-for-shears-usage.patch && cd ..
+python mpt_process/split_qkv_preprocess.py --base_model_name_or_path mpt-7b  # Wqkv -> q_proj, k_proj, v_proj
+# Wanda for MPT
+mv mpt_process/wanda/main_mpt.py wanda && mv mpt_process/wanda/prune_mpt.py wanda/lib
+
+# MPT-7B (sparsity: 40%)
+
+CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main_mpt.py \
+    --model mpt-7b \
+    --prune_method wanda \
+    --sparsity_ratio 0.4 \
+    --sparsity_type unstructured \
+    --save wanda_out \
+    --save_model unstructured_sparsity_models/mpt-7b-sparsity40
+
+CUDA_VISIBLE_DEVICES=$DEVICES python run_gsm8k.py \
+    --dataset_path None \
+    --model_name_or_path unstructured_sparsity_models/mpt-7b-sparsity40 \
+    --do_train \
+    --do_test \
+    --per_device_train_batch_size 8 \
+    --gradient_accumulation_steps 2 \
+    --num_train_epochs 4 \
+    --warmup_steps 100 \
+    --optim adamw_torch \
+    --fp16 \
+    --output_dir trained_super_adapter/gsm8k/mpt-7b-sparsity40-shears-gsm8k-adapter \
+    --logging_steps 20 \
+    --save_strategy epoch \
+    --save_total_limit 2 \
+    --lora \
+    --lora_r 32 \
+    --lora_alpha 64 \
+    --lora_dropout 0.1 \
+    --target_modules q_proj,k_proj,v_proj,out_proj,up_proj,down_proj \
+    --nncf_config nncf_config/gsm8k/nncf_shears_mpt_7b_sparsity40.json
+
+# MPT-7B (sparsity: 50%)
+
+CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main_mpt.py \
+    --model mpt-7b \
+    --prune_method wanda \
+    --sparsity_ratio 0.5 \
+    --sparsity_type unstructured \
+    --save wanda_out \
+    --save_model unstructured_sparsity_models/mpt-7b-sparsity50
+
+CUDA_VISIBLE_DEVICES=$DEVICES python run_gsm8k.py \
+    --dataset_path None \
+    --model_name_or_path unstructured_sparsity_models/mpt-7b-sparsity50 \
+    --do_train \
+    --do_test \
+    --per_device_train_batch_size 8 \
+    --gradient_accumulation_steps 2 \
+    --num_train_epochs 5 \
+    --warmup_steps 100 \
+    --optim adamw_torch \
+    --fp16 \
+    --output_dir trained_super_adapter/gsm8k/mpt-7b-sparsity50-shears-gsm8k-adapter \
+    --logging_steps 20 \
+    --save_strategy epoch \
+    --save_total_limit 2 \
+    --lora \
+    --lora_r 32 \
+    --lora_alpha 64 \
+    --lora_dropout 0.1 \
+    --target_modules q_proj,k_proj,v_proj,out_proj,up_proj,down_proj \
+    --nncf_config nncf_config/gsm8k/nncf_shears_mpt_7b_sparsity50.json
+
+# MPT-7B (sparsity: 60%)
+
+CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main_mpt.py \
+    --model mpt-7b \
+    --prune_method wanda \
+    --sparsity_ratio 0.6 \
+    --sparsity_type unstructured \
+    --save wanda_out \
+    --save_model unstructured_sparsity_models/mpt-7b-sparsity60
+
+CUDA_VISIBLE_DEVICES=$DEVICES python run_gsm8k.py \
+    --dataset_path None \
+    --model_name_or_path unstructured_sparsity_models/mpt-7b-sparsity60 \
+    --do_train \
+    --do_test \
+    --per_device_train_batch_size 8 \
+    --gradient_accumulation_steps 2 \
+    --num_train_epochs 5 \
+    --warmup_steps 100 \
+    --optim adamw_torch \
+    --fp16 \
+    --output_dir trained_super_adapter/gsm8k/mpt-7b-sparsity60-shears-gsm8k-adapter \
+    --logging_steps 20 \
+    --save_strategy epoch \
+    --save_total_limit 2 \
+    --lora \
+    --lora_r 32 \
+    --lora_alpha 64 \
+    --lora_dropout 0.1 \
+    --target_modules q_proj,k_proj,v_proj,out_proj,up_proj,down_proj \
+    --nncf_config nncf_config/gsm8k/nncf_shears_mpt_7b_sparsity60.json
+
+# LLaMA with the Unified Commonsense Reasoning Dataset
+
+# LLaMA-7B (sparsity: 40%)
+
+CUDA_VISIBLE_DEVICES=$DEVICES python run_commonsense.py \
+    --dataset_path datasets/commonsense_170k.json \
+    --model_name_or_path unstructured_sparsity_models/llama-7b-sparsity40 \
+    --do_train \
+    --do_test \
+    --per_device_train_batch_size 4 \
+    --gradient_accumulation_steps 4 \
+    --num_train_epochs 3 \
+    --warmup_steps 100 \
+    --optim adamw_torch \
+    --fp16 \
+    --output_dir trained_super_adapter/unified_commonsense/llama-7b-sparsity40-shears-commonsense-adapter \
+    --logging_steps 20 \
+    --save_strategy epoch \
+    --save_total_limit 2 \
+    --lora \
+    --lora_r 32 \
+    --lora_alpha 64 \
+    --lora_dropout 0.1 \
+    --target_modules q_proj,k_proj,v_proj,up_proj,gate_proj,down_proj \
+    --nncf_config nncf_config/unified_commonsense/nncf_shears_llama_7b_sparsity40.json
+
+# LLaMA-7B (sparsity: 50%)
+
+CUDA_VISIBLE_DEVICES=$DEVICES python run_commonsense.py \
+    --dataset_path datasets/commonsense_170k.json \
+    --model_name_or_path unstructured_sparsity_models/llama-7b-sparsity50 \
+    --do_train \
+    --do_test \
+    --per_device_train_batch_size 4 \
+    --gradient_accumulation_steps 4 \
+    --num_train_epochs 3 \
+    --warmup_steps 100 \
+    --optim adamw_torch \
+    --fp16 \
+    --output_dir trained_super_adapter/unified_commonsense/llama-7b-sparsity50-shears-commonsense-adapter \
+    --logging_steps 20 \
+    --save_strategy epoch \
+    --save_total_limit 2 \
+    --lora \
+    --lora_r 32 \
+    --lora_alpha 64 \
+    --lora_dropout 0.1 \
+    --target_modules q_proj,k_proj,v_proj,up_proj,gate_proj,down_proj \
+    --nncf_config nncf_config/unified_commonsense/nncf_shears_llama_7b_sparsity50.json
