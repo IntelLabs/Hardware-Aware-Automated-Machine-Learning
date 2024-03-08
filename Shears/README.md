@@ -9,13 +9,12 @@ This repo proposes **Shears**, a practical and novel solution for real-world app
 
 ## Released Models 🤗
 
-| Name                                                         | Sparsity                                               | Train Data                                                         | Base Model
-| ------------------------------------------------------------ | ------------------------------------------------------ | ------------------------------------------------------------ | ------- | 
-| [IntelLabs/llama-7b-sparsity50-shears-math]()    | 50%  | [Unified Math Reasoning Dataset](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)           | [yahma/llama-7b-hf](https://huggingface.co/yahma/llama-7b-hf)
-| [IntelLabs/llama-7b-sparsity50-shears-commonsense]()     | 50%          | [Unified Commonsense Reasoning Dataset](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/commonsense_170k.json)     | [yahma/llama-7b-hf](https://huggingface.co/yahma/llama-7b-hf)
-| [IntelLabs/llama-13b-sparsity50-shears-math]()        | 50%           | [Unified Math Reasoning Dataset](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)        |  [yahma/llama-13b-hf](https://huggingface.co/yahma/llama-13b-hf)
-| [IntelLabs/mpt-7b-sparsity50-shears-gsm8k]()     | 50%                 | [GSM8K](https://huggingface.co/datasets/gsm8k)              | [mosaicml/mpt-7b](https://huggingface.co/mosaicml/mpt-7b)
-
+| Name                                                                                                                 | Super-network                                                                                                       | Sparsity                                               | Train Data                                                         | Base Model
+|----------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------| ------------------------------------------------------ | ------------------------------------------------------------ | ------- | 
+| [shears-llama-7b-50-math-heu](https://huggingface.co/IntelLabs/shears-llama-7b-50-math-heu) | [shears-llama-7b-50-math-super](https://huggingface.co/IntelLabs/shears-llama-7b-50-math-super)             | 50%           | [Unified Math](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)         | [yahma/llama-7b-hf](https://huggingface.co/yahma/llama-7b-hf)
+| [shears-llama-7b-50-commonsense-heu](https://huggingface.co/IntelLabs/shears-llama-7b-50-commonsense-heu) | [shears-llama-7b-50-commonsense-super](https://huggingface.co/IntelLabs/shears-llama-7b-50-commonsense-super) | 50%                                                                               | [Unified Commonsense](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/commonsense_170k.json) | [yahma/llama-7b-hf](https://huggingface.co/yahma/llama-7b-hf)
+| [shears-llama-13b-50-math-heu](https://huggingface.co/IntelLabs/shears-llama-13b-50-math-heu) | [shears-llama-13b-50-math-super](https://huggingface.co/IntelLabs/shears-llama-13b-50-math-super)             | 50%                                                                                      | [Unified Math](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)      |  [yahma/llama-13b-hf](https://huggingface.co/yahma/llama-13b-hf)
+| [shears-mpt-7b-50-gsm8k-heu](https://huggingface.co/IntelLabs/shears-mpt-7b-50-gsm8k-heu) | [shears-mpt-7b-50-gsm8k-super](https://huggingface.co/IntelLabs/shears-mpt-7b-50-gsm8k-super)                 | 50%                                                                                      | [GSM8K](https://huggingface.co/datasets/gsm8k)              | [mosaicml/mpt-7b](https://huggingface.co/mosaicml/mpt-7b)
 
 ## Overview
 
@@ -63,7 +62,7 @@ Before fine-tuning, Shears employes a simple but effective pruning approach [Wan
 Clone the [Wanda](https://github.com/locuslab/wanda) repo:
 
 ```bash
-git clone https://github.com/locuslab/wanda.git
+git clone https://github.com/locuslab/wanda.git && pushd wanda && git checkout 8e8fc87 && popd
 ```
 
 Below is an example command for unstructured sparsifying LLaMA-7b with Wanda, to achieve unstructured 50% sparsity (takes about five minutes).
