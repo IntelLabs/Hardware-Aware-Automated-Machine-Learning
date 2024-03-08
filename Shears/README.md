@@ -153,4 +153,11 @@ If you find our Shears code and paper helpful, please kindly cite:
 ```
 
 ## Acknowledgement
-This work benefits from the contributions of [NNCF](https://github.com/openvinotoolkit/nncf), [BootstrapNAS](https://github.com/jpablomch/bootstrapnas), and [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters). Thanks for their outstanding efforts. :bulb:
+This work benefits from the following contributions:
+
+- LLaMA: [https://github.com/facebookresearch/llama](https://github.com/facebookresearch/llama)
+- MPT: [https://www.mosaicml.com/mpt](https://www.mosaicml.com/mpt)
+- Peft: [https://github.com/huggingface/peft](https://github.com/huggingface/peft)
+- LLM-Adapters: [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters)
+- NNCF: [https://github.com/openvinotoolkit/nncf](https://github.com/openvinotoolkit/nncf)
+- BootstrapNAS: [https://github.com/jpablomch/bootstrapnas](https://github.com/jpablomch/bootstrapnas)
