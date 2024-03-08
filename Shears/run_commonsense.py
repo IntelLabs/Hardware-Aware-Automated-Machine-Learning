@@ -1,84 +1,59 @@
 #!/usr/bin/env python
 # coding=utf-8
+import copy
+import json
 import logging
 import os
-import sys
-import torch
-from dataclasses import dataclass, field
-from typing import Optional
-import json
 import re
-import copy
+import sys
+from dataclasses import dataclass
+from dataclasses import field
+from typing import Optional
+
 import datasets
-from nncf import NNCFConfig
-from nncf.torch.model_creation import create_nncf_network
-from nncf.experimental.torch.nas.bootstrapNAS.training.model_creator_helpers import create_compressed_model_from_algo_names
-from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import ElasticityDim
-from nncf.torch.layers import NNCFLinear
-from nncf.torch.module_operations import UpdateWeight, UpdateWeightAndOptionalBias
-from peft import LoraConfig, get_peft_model, PeftModel
-from datasets import load_dataset
-
+import torch
 import transformers
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    LlamaTokenizer,
-    HfArgumentParser,
-    Trainer,
-    TrainingArguments,
-    set_seed,
-    GenerationConfig
-)
+from datasets import load_dataset
+from peft import LoraConfig
+from peft import PeftModel
+from peft import get_peft_model
+from transformers import AutoModelForCausalLM
+from transformers import AutoTokenizer
+from transformers import GenerationConfig
+from transformers import HfArgumentParser
+from transformers import Trainer
+from transformers import TrainingArguments
+from transformers import set_seed
 from transformers.trainer_utils import get_last_checkpoint
-from transformers.utils import check_min_version, send_example_telemetry
-from transformers.utils.versions import require_version
+from transformers.utils import check_min_version
 
+from nncf import NNCFConfig
+from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import ElasticityDim
+from nncf.experimental.torch.nas.bootstrapNAS.training.model_creator_helpers import (
+    create_compressed_model_from_algo_names,
+)
+from nncf.torch.layers import NNCFLinear
+from nncf.torch.model_creation import create_nncf_network
+from nncf.torch.module_operations import UpdateWeight
+from nncf.torch.module_operations import UpdateWeightAndOptionalBias
 
-# Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.31.0")
-
-require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/text-classification/requirements.txt")
-
 logger = logging.getLogger(__name__)
 TEST_DATASETS = ["boolq", "piqa", "social_i_qa", "winogrande", "ARC-Easy", "ARC-Challenge", "openbookqa", "hellaswag"]
 
 
 @dataclass
 class ShearsTrainingArguments(TrainingArguments):
-    lora_r: int = field(
-        default=32,
-        metadata={"help": "Lora R dimension."}
-    )
-    lora_alpha: float = field(
-        default=64,
-        metadata={"help": " Lora alpha."}
-    )
-    lora_dropout: float = field(
-        default=0.0,
-        metadata={"help": "Lora dropout."}
-    )
+    lora_r: int = field(default=32, metadata={"help": "Lora R dimension."})
+    lora_alpha: float = field(default=64, metadata={"help": " Lora alpha."})
+    lora_dropout: float = field(default=0.0, metadata={"help": "Lora dropout."})
     target_modules: str = field(
-        default="q_proj,v_proj",
-        metadata={"help": "Which module will be added the lora adapter."}
+        default="q_proj,v_proj", metadata={"help": "Which module will be added the lora adapter."}
     )
-    lora: bool = field(
-        default=False,
-        metadata={"help": "Whether to apply lora or not."}
-    )
-    train_on_inputs: bool = field(
-        default=True
-    )
-    do_test: bool = field(
-        default=False
-    )
-    # set_trainable_params: bool = field(
-    #     default=False,
-    #     metadata={"help": "Whether to set trainable parameters of pretrain modules or not."}
-    # )
-    test_specific_config: bool = field(
-        default=False
-    )
+    lora: bool = field(default=False, metadata={"help": "Whether to apply lora or not."})
+    train_on_inputs: bool = field(default=True)
+    do_test: bool = field(default=False)
+    test_specific_config: bool = field(default=False)
 
 
 @dataclass
@@ -91,9 +66,7 @@ class DataTrainingArguments:
     the command line.
     """
 
-    dataset_path: Optional[str] = field(
-        default=None, metadata={"help": "The path of the dataset to use."}
-    )
+    dataset_path: Optional[str] = field(default=None, metadata={"help": "The path of the dataset to use."})
     dataset_config_name: Optional[str] = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
     )
@@ -167,9 +140,7 @@ class ModelArguments:
     model_name_or_path: str = field(
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
-    lora_weights: str = field(
-        default=None
-    )
+    lora_weights: str = field(default=None)
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
@@ -204,23 +175,12 @@ class ModelArguments:
 
 
 def main():
-    # See all possible arguments in src/transformers/training_args.py
-    # or by passing the --help flag to this script.
-    # We now keep distinct sets of args, for a cleaner separation of concerns.
-
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ShearsTrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-        # If we pass only one argument to the script and it's the path to a json file,
-        # let's parse it to get our arguments.
         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
-    # information sent is the one passed as arguments along with your Python/PyTorch versions.
-    send_example_telemetry("run_glue", model_args, data_args)
-
-    # Setup logging
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
@@ -228,7 +188,6 @@ def main():
     )
 
     if training_args.should_log:
-        # The default of training_args.log_level is passive, so we set log level at info here to have that default.
         transformers.utils.logging.set_verbosity_info()
 
     log_level = training_args.get_process_log_level()
@@ -245,7 +204,7 @@ def main():
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
-    # Detecting last checkpoint.
+    # Detecting last checkpoint
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
@@ -263,37 +222,31 @@ def main():
     # Set seed before initializing model.
     set_seed(training_args.seed)
 
-    # load model
+    # Load model
     model = AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         load_in_8bit=False,
         torch_dtype=torch.float16,
         device_map={"": 0},
         trust_remote_code=True,
-        cache_dir=model_args.cache_dir
+        cache_dir=model_args.cache_dir,
     )
-    # model = prepare_model_for_int8_training(model)
 
     if training_args.lora and model_args.lora_weights is None:
-        logger.info('adding LoRA modules...')
+        logger.info("adding LoRA modules...")
         config = LoraConfig(
             r=training_args.lora_r,
             lora_alpha=training_args.lora_alpha,
             lora_dropout=training_args.lora_dropout,
-            target_modules=training_args.target_modules.split(','),
+            target_modules=training_args.target_modules.split(","),
             bias="none",
             task_type="CAUSAL_LM",
         )
         model = get_peft_model(model, config)
         model.print_trainable_parameters()
     elif training_args.lora:
-        logger.info('Loading LoRA modules...')
-        model = PeftModel.from_pretrained(
-            model,
-            model_args.lora_weights,
-            torch_dtype=torch.float16,
-            device_map={"":0}
-        )
+        logger.info("Loading LoRA modules...")
+        model = PeftModel.from_pretrained(model, model_args.lora_weights, torch_dtype=torch.float16, device_map={"": 0})
 
     nncf_config = None
     if training_args.nncf_config is not None:
@@ -308,23 +261,18 @@ def main():
     compression_ctrl = None
     if nncf_config is not None:
         nncf_network = create_nncf_network(model, nncf_config)
-        algo_name = nncf_config.get('bootstrapNAS', {}).get('training', {}).get('algorithm', 'progressive_shrinking')
-        compression_ctrl, model = create_compressed_model_from_algo_names(nncf_network, nncf_config, algo_names=[algo_name])
+        algo_name = nncf_config.get("bootstrapNAS", {}).get("training", {}).get("algorithm", "progressive_shrinking")
+        compression_ctrl, model = create_compressed_model_from_algo_names(
+            nncf_network, nncf_config, algo_names=[algo_name]
+        )
 
-    # load tokenizer
-    if "llama" in model_args.model_name_or_path:
-        tokenizer = LlamaTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
-    else:
-        tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
-    tokenizer.pad_token_id = (
-        0  # unk. we want this to be different from the eos token
-    )
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
+    tokenizer.pad_token_id = 0
     tokenizer.padding_side = "left"  # Allow batched inference
 
     # Load data
     def tokenize(prompt, add_eos_token=True):
-        # there's probably a way to do this with the tokenizer settings
-        # but again, gotta move fast
         result = tokenizer(
             prompt,
             truncation=True,
@@ -333,9 +281,9 @@ def main():
             return_tensors=None,
         )
         if (
-                result["input_ids"][-1] != tokenizer.eos_token_id
-                and len(result["input_ids"]) < data_args.cutoff_len
-                and add_eos_token
+            result["input_ids"][-1] != tokenizer.eos_token_id
+            and len(result["input_ids"]) < data_args.cutoff_len
+            and add_eos_token
         ):
             result["input_ids"].append(tokenizer.eos_token_id)
 
@@ -346,7 +294,6 @@ def main():
         return result
 
     def generate_prompt(data_point):
-        # sorry about the formatting disaster gotta move fast
         if data_point["input"]:
             return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request. 
 
@@ -357,7 +304,7 @@ def main():
                     {data_point["input"]}
 
                     ### Response:
-                    {data_point["output"]}"""  # noqa: E501
+                    {data_point["output"]}"""
         else:
             return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request.  
 
@@ -365,7 +312,7 @@ def main():
                     {data_point["instruction"]}
 
                     ### Response:
-                    {data_point["output"]}"""  # noqa: E501
+                    {data_point["output"]}"""
 
     def generate_and_tokenize_prompt(data_point):
         full_prompt = generate_prompt(data_point)
@@ -375,7 +322,9 @@ def main():
             tokenized_user_prompt = tokenize(user_prompt, add_eos_token=False)
             user_prompt_len = len(tokenized_user_prompt["input_ids"])
 
-            tokenized_full_prompt["labels"] = [-100] * user_prompt_len + tokenized_full_prompt["labels"][user_prompt_len:]
+            tokenized_full_prompt["labels"] = [-100] * user_prompt_len + tokenized_full_prompt["labels"][
+                user_prompt_len:
+            ]
         return tokenized_full_prompt
 
     train_dataset, eval_dataset = None, None
@@ -384,15 +333,9 @@ def main():
 
         val_set_size = data_args.val_set_size
         if val_set_size > 0:
-            train_val = data["train"].train_test_split(
-                test_size=val_set_size, shuffle=True, seed=42
-            )
-            train_dataset = (
-                train_val["train"].shuffle().map(generate_and_tokenize_prompt)
-            )
-            eval_dataset = (
-                train_val["test"].shuffle().map(generate_and_tokenize_prompt)
-            )
+            train_val = data["train"].train_test_split(test_size=val_set_size, shuffle=True, seed=42)
+            train_dataset = train_val["train"].shuffle().map(generate_and_tokenize_prompt)
+            eval_dataset = train_val["test"].shuffle().map(generate_and_tokenize_prompt)
         else:
             train_dataset = data["train"].shuffle().map(generate_and_tokenize_prompt)
             eval_dataset = None
@@ -406,7 +349,7 @@ def main():
         data_collator=transformers.DataCollatorForSeq2Seq(
             tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True
         ),
-        compression_ctrl=compression_ctrl
+        compression_ctrl=compression_ctrl,
     )
 
     if nncf_config is not None:
@@ -437,33 +380,33 @@ def main():
 
     def extract_answer(dataset_name, sentence: str) -> float:
         dataset = dataset_name
-        if dataset == 'boolq':
+        if dataset == "boolq":
             sentence_ = sentence.strip()
-            pred_answers = re.findall(r'true|false', sentence_)
+            pred_answers = re.findall(r"true|false", sentence_)
             if not pred_answers:
                 return ""
             return pred_answers[0]
-        elif dataset == 'piqa':
+        elif dataset == "piqa":
             sentence_ = sentence.strip()
-            pred_answers = re.findall(r'solution1|solution2', sentence_)
+            pred_answers = re.findall(r"solution1|solution2", sentence_)
             if not pred_answers:
                 return ""
             return pred_answers[0]
-        elif dataset in ['social_i_qa', 'ARC-Challenge', 'ARC-Easy', 'openbookqa']:
+        elif dataset in ["social_i_qa", "ARC-Challenge", "ARC-Easy", "openbookqa"]:
             sentence_ = sentence.strip()
-            pred_answers = re.findall(r'answer1|answer2|answer3|answer4|answer5', sentence_)
+            pred_answers = re.findall(r"answer1|answer2|answer3|answer4|answer5", sentence_)
             if not pred_answers:
                 return ""
             return pred_answers[0]
-        elif dataset == 'hellaswag':
+        elif dataset == "hellaswag":
             sentence_ = sentence.strip()
-            pred_answers = re.findall(r'ending1|ending2|ending3|ending4', sentence_)
+            pred_answers = re.findall(r"ending1|ending2|ending3|ending4", sentence_)
             if not pred_answers:
                 return ""
             return pred_answers[0]
-        elif dataset == 'winogrande':
+        elif dataset == "winogrande":
             sentence_ = sentence.strip()
-            pred_answers = re.findall(r'option1|option2', sentence_)
+            pred_answers = re.findall(r"option1|option2", sentence_)
             if not pred_answers:
                 return ""
             return pred_answers[0]
@@ -472,10 +415,10 @@ def main():
         """
         read data from dataset file
         """
-        file_path = f'datasets/{test_dataset}/test.json'
+        file_path = f"datasets/{test_dataset}/test.json"
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"can not find dataset file : {file_path}")
-        json_data = json.load(open(file_path, 'r'))
+        json_data = json.load(open(file_path, "r"))
         return json_data
 
     def generate_prompt_eval(instruction, input=None):
@@ -500,15 +443,15 @@ def main():
                         """
 
     def evaluate_one_sample(
-            instruction,
-            input=None,
-            model=None,
-            temperature=0.1,
-            top_p=0.75,
-            top_k=40,
-            num_beams=4,
-            max_new_tokens=32,
-            **kwargs,
+        instruction,
+        input=None,
+        model=None,
+        temperature=0.1,
+        top_p=0.75,
+        top_k=40,
+        num_beams=4,
+        max_new_tokens=32,
+        **kwargs,
     ):
         prompts = generate_prompt_eval(instruction, input)
         inputs = tokenizer(prompts, return_tensors="pt")
@@ -541,32 +484,31 @@ def main():
         correct = 0
         output_data = []
         for idx, data in enumerate(dataset):
-            instruction = data.get('instruction')
+            instruction = data.get("instruction")
             output = evaluate_one_sample(instruction, model=model)
-            label = data.get('answer')
+            label = data.get("answer")
             flag = False
             predict = extract_answer(dataset_name, output)
             if label == predict:
                 correct += 1
                 flag = True
             new_data = copy.deepcopy(data)
-            new_data['output_pred'] = output
-            new_data['pred'] = predict
-            new_data['flag'] = flag
+            new_data["output_pred"] = output
+            new_data["pred"] = predict
+            new_data["flag"] = flag
             output_data.append(new_data)
             print(data["instruction"])
             print(output)
-            print('prediction:', predict)
-            print('label:', label)
+            print("prediction:", predict)
+            print("label:", label)
 
-            print(f'\rtest:{idx + 1}/{total} | accuracy {correct}  {correct / (idx + 1)}')
+            print(f"\rtest:{idx + 1}/{total} | accuracy {correct}  {correct / (idx + 1)}")
 
-            with open(save_file, 'w+') as f:
+            with open(save_file, "w+") as f:
                 json.dump(output_data, f, indent=4)
 
         acc = correct / total
         return acc
-
 
     def check_lora_sparsity(model):
         def find_layers(module, layers=[torch.nn.Linear], name=""):
@@ -650,7 +592,7 @@ def main():
             f"{name}_non_zero_params": non_zero_params,
             f"{name}_sparsity": sparsity,
             f"{name}_macs": str(macs / 2000000),
-            f"{name}_weights": str(weights)
+            f"{name}_weights": str(weights),
         }
         trainer.save_metrics("eval", metrics)
         trainer.log_metrics("eval", metrics)
@@ -668,38 +610,24 @@ def main():
         trainer.save_metrics("eval", metrics)
         trainer.log_metrics("eval", metrics)
 
-    # test accuracy (maximal, heuristic and minimal subnetwork)
     if training_args.do_test and training_args.local_rank <= 0:
-
-        # LoNAS
         if compression_ctrl is not None:
-
-            # whether reordering
-            if not training_args.do_train and compression_ctrl is not None and \
-                    nncf_config.get("bootstrapNAS", {}).get("training", {}).get("schedule", {}).get(
-                        "list_stage_descriptions", [{}])[0].get("reorg_weights", False):
-                trainer.compression_ctrl.multi_elasticity_handler.width_handler.reorganize_weights()
-
             trainer.compression_ctrl.multi_elasticity_handler.enable_all()
             compression_ctrl.multi_elasticity_handler.width_handler.width_num_params_indicator = -1
             # Heuristic subnetwork
-            heuristic_config = {k: v[(len(v) - 1) // 2]
-                                for k, v in
-                                compression_ctrl.multi_elasticity_handler.width_search_space.items()}
             heuristic_config = {
-                ElasticityDim.WIDTH: heuristic_config
+                k: v[(len(v) - 1) // 2] for k, v in compression_ctrl.multi_elasticity_handler.width_search_space.items()
             }
+            heuristic_config = {ElasticityDim.WIDTH: heuristic_config}
             trainer.compression_ctrl.multi_elasticity_handler.activate_subnet_for_config(heuristic_config)
             test_subnetwork(trainer.model, "Heuristic")
         else:
-            # LoRA
             all_results = []
             for test_dataset in TEST_DATASETS:
                 logger.info(f"*** Evaluation on {test_dataset} ***")
                 save_file = os.path.join(training_args.output_dir, f"{test_dataset}.res.json")
                 sparsity = check_lora_sparsity(trainer.model)
-                non_zero_params = sum(
-                    [(param.data != 0).sum().item() for _, param in trainer.model.named_parameters()])
+                non_zero_params = sum([(param.data != 0).sum().item() for _, param in trainer.model.named_parameters()])
                 accuracy = evaluate(trainer.model, test_dataset, save_file)
                 all_results.append(accuracy)
                 metrics = {
@@ -715,7 +643,6 @@ def main():
             trainer.log_metrics("eval", avg_metrics)
 
     kwargs = {"finetuned_from": model_args.model_name_or_path}
-
 
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
