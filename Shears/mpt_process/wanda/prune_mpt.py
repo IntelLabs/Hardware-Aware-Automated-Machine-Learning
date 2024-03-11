@@ -204,4 +204,3 @@ def prune_wanda(args, model, tokenizer, device=torch.device("cuda:0"), prune_n=0
 
     model.config.use_cache = use_cache
     torch.cuda.empty_cache()
-

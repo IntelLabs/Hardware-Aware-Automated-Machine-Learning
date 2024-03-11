@@ -1,0 +1,38 @@
+diff --git a/src/peft/utils/save_and_load.py b/src/peft/utils/save_and_load.py
+index 617287e..cb64cf7 100644
+--- a/src/peft/utils/save_and_load.py
++++ b/src/peft/utils/save_and_load.py
+@@ -132,6 +132,33 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
+     else:
+         raise NotImplementedError
+ 
++    def module_reshape(state_dict):
++        for param_name, param in state_dict.items():
++            tensor_name = param_name
++            splits = tensor_name.split(".")
++            if len(splits) > 1:
++                module = model
++                parent = None
++                for split in splits[:-1]:
++                    new_module = getattr(module, split)
++                    if new_module is None:
++                        raise ValueError(f"{module} has no attribute {split}.")
++                    parent = module
++                    module = new_module
++                tensor_name = splits[-1]
++                old_value = getattr(module, tensor_name)
++                if old_value.shape != param.shape and isinstance(module, torch.nn.Linear):
++                    new_module = torch.nn.Linear(
++                        param.shape[1],
++                        param.shape[0],
++                        bias=module.bias is not None,
++                        dtype=module.weight.dtype,
++                        device=module.weight.device
++                    )
++                    setattr(parent, splits[-2], new_module)
++
++    module_reshape(peft_model_state_dict)
++
+     load_result = model.load_state_dict(peft_model_state_dict, strict=False)
+     if config.is_prompt_learning:
+         model.prompt_encoder[adapter_name].embedding.load_state_dict(
