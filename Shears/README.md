@@ -2,10 +2,10 @@
 
 Official implementation of [Shears: Unstructured Sparsity with Neural Low-rank Adapter Search](). :fire:
 
-This repo proposes **Shears**, a practical and novel solution for real-world applications to generate efficient models fine-tuned for downstream specific tasks.
+This repo contains the code for **Shears**, a practical and novel solution that generates efficient models fine-tuned for downstream-specific tasks for real-world applications. Please refer to our [paper]() for more details.
 
 ## News
-- **[2024.03.07]**  The training and inference code for **Shears V1** are released. :tada:
+- **[2024.03.07]**  Release training and inference code for **Shears V1**. :tada:
 
 ## Released Models 🤗
 
@@ -19,14 +19,15 @@ This repo proposes **Shears**, a practical and novel solution for real-world app
 ## Overview
 
 Efficiency Comparison (use LLaMA-13B as an example):
-|  Method | Sparsity | Non-zero Params. | Acc. | Inference Speedup  
+
+| Method | Sparsity | Non-zero Params. | Acc. | Inference Speedup  
 | :-----: | :-----: |:-----:| :-----: | :-----: |
-|  [LoRA](https://github.com/microsoft/LoRA) | - | 13.0B | 51.1 | 1.00x |
+| [LoRA](https://github.com/microsoft/LoRA) | - | 13.0B | 51.1 | 1.00x |
 | Shears | 50% | 6.7B | 50.9 | 1.84x |
 
-By incorporating elastic LoRA adapters into the sparsified base model, Shears can fine-tune the language model without sacrificing the sparsity obtained from the original model weights, and produces sparse models with improvements or minor drops in accuracy and a fraction of the cost when compared to other approaches. The increase in sparsity can result in significant speedup when using runtimes that take advantage of these patterns. Please refer to our [paper]() for more details.
+By incorporating elastic LoRA adapters into a sparsified base model, Shears can fine-tune a language model without sacrificing the sparsity obtained from the original model weights. This produces sparse models with improvements or minor drops in accuracy and a fraction of the cost compared to other approaches. The increase in sparsity can result in a significant speedup when using runtimes that take advantage of these patterns. 
 
-Overall, Shears has well-designed a simple yet effective, powerful and general pipeline, allowing users to easily extend it to their desired scenarios/tasks, even audio and video. Feel free to try Shears for any downstream task with any model. :relaxed:
+Overall, Shears has a well-designed, simple yet effective, powerful, and general pipeline that allows users to easily extend it to their desired scenarios/tasks, even audio and video. Feel free to try Shears for any downstream task with any model. :relaxed:
 
 ## Setup
 
@@ -39,7 +40,7 @@ conda activate shears
 # install dependencies
 bash install.sh
 ```
-Note: please ignore the whitespace issues when applying the patch when running `install.sh`.
+Note: Please ignore the whitespace issues when applying the patch and running `install.sh`.
 
 ## Quick Start
 
@@ -49,7 +50,7 @@ Please download our released models from [Hugging Face](https://huggingface.co/I
 Each Shears model contains the pretrained weights of the sparsified language model and the weights of the fine-tuned adapters.
 Denote the path to the downloaded model as `SHEARS_PATH`.
 
-Below is an example to generate the instruction-following responses for some math reasoning samples:
+Below is an example of generating the instruction-following responses for some math reasoning samples:
 ```bash
 CUDA_VISIBLE_DEVICES=$DEVICES python example.py --model_path $SHEARS_PATH
 ```
@@ -58,7 +59,7 @@ CUDA_VISIBLE_DEVICES=$DEVICES python example.py --model_path $SHEARS_PATH
 
 #### Step 1. Unstructured Sparsifying
 
-Before fine-tuning, Shears employes a simple but effective pruning approach [Wanda](https://arxiv.org/abs/2306.11695) to sparsify the language model, serving as the base model (frozen) for adapter training.
+Before fine-tuning, Shears employs a simple but effective pruning approach [Wanda](https://arxiv.org/abs/2306.11695) to sparsify the language model, serving as the base model (frozen) for adapter training.
 Clone the [Wanda](https://github.com/locuslab/wanda) repo:
 
 ```bash
@@ -111,8 +112,8 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
 ```
 
 `nncf_config` indicates the NNCF configuration including the search space for elastic adapters.
-To implement the elastic adapter, we apply the BootstrapNAS feature supported in [OpenVINO™ NNCF](https://github.com/openvinotoolkit/nncf), which provides a suite of compression algorithms for neural networks optimization.
-Note that we use the stage LR scheduler in NNCF, so the learning rate is set in the NNCF config file, instead of `learning_rate` of `TrainingArguments`.
+To implement the elastic adapter, we apply the BootstrapNAS feature supported in [OpenVINO™ NNCF](https://github.com/openvinotoolkit/nncf), which provides a suite of compression algorithms for neural network optimization.
+Note that we use the stage LR scheduler in NNCF, so the learning rate is set in the NNCF config file instead of the `learning_rate` of `TrainingArguments`.
 
 ### Evaluation
 
@@ -139,7 +140,7 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
 
 ## Reproduce Results
 
-Please refer to `running_commands` for all commands related to reproducing the results of the paper.
+Please refer to `running_commands` for all commands related to reproducing the paper's results.
 
 ## Citation
 If you find our Shears code and paper helpful, please kindly cite:
@@ -153,11 +154,11 @@ If you find our Shears code and paper helpful, please kindly cite:
 ```
 
 ## Acknowledgement
-This work benefits from the following contributions:
+This work benefits from the following repositories:
 
 - LLaMA: [https://github.com/facebookresearch/llama](https://github.com/facebookresearch/llama)
 - MPT: [https://www.mosaicml.com/mpt](https://www.mosaicml.com/mpt)
 - Peft: [https://github.com/huggingface/peft](https://github.com/huggingface/peft)
 - LLM-Adapters: [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters)
 - NNCF: [https://github.com/openvinotoolkit/nncf](https://github.com/openvinotoolkit/nncf)
-- BootstrapNAS: [https://github.com/jpablomch/bootstrapnas](https://github.com/jpablomch/bootstrapnas)
+- BootstrapNAS: [https://github.com/IntelLabs/Hardware-Aware-Automated-Machine-Learning/blob/main/BootstrapNAS](https://github.com/IntelLabs/Hardware-Aware-Automated-Machine-Learning/blob/main/BootstrapNAS)
