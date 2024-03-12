@@ -30,6 +30,7 @@ def main():
         load_in_8bit=False,
         torch_dtype=torch.float16,
         device_map={"": 0},
+        trust_remote_code=True
     )
     model = PeftModel.from_pretrained(base_model, lora_weights, torch_dtype=torch.float16, device_map={"": 0})
 
