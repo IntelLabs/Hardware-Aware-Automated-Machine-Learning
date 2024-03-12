@@ -20,7 +20,7 @@ def generate_prompt(instruction):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_path", default="llama-7b-sparsity50-shears-math-heu", type=str)
+    parser.add_argument("--model_path", default="llama-7b-sparsity50-shears-math-heuristic", type=str)
     args = parser.parse_args()
     model_path = os.path.join(args.model_path, "base_model")
     lora_weights = os.path.join(args.model_path, "adapter_model")
