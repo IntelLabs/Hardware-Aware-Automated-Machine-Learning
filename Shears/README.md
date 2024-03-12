@@ -46,10 +46,13 @@ Note: Please ignore the whitespace issues when applying the patch and running `i
 
 ### Inference
 
-Please download our released models from [Hugging Face](https://huggingface.co/IntelLabs) - checkout [Table](#released-models-) for model information. 
+Please clone/download our released models from [HuggingFace](https://huggingface.co/IntelLabs) - checkout [Table](#released-models-) for model information, e.g.,
+```bash
+git lfs install
+git clone https://huggingface.co/IntelLabs/shears-llama-7b-50-math-heuristic
+```
 Each Shears model contains the pretrained weights of the sparsified language model and the weights of the fine-tuned adapters.
 Denote the path to the downloaded model as `SHEARS_PATH`.
-
 Below is an example of generating the instruction-following responses for some math reasoning samples:
 ```bash
 CUDA_VISIBLE_DEVICES=$DEVICES python example.py --model_path $SHEARS_PATH
