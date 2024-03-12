@@ -10,9 +10,9 @@ from nncf.torch.model_creation import create_nncf_network
 TModel = TypeVar("TModel")
 
 
-class TransformerSuperNet(TrainedSuperNet):
+class ShearsSuperNet(TrainedSuperNet):
     """
-    An interface for handling pre-trained transformer-based super-networks. This class can be used to quickly implement
+    An interface for handling trained Shears super-networks. This class can be used to quickly implement
     third party solutions for subnetwork search on existing super-networks.
     """
 
@@ -29,9 +29,10 @@ class TransformerSuperNet(TrainedSuperNet):
 
         :param model: base model that was used to create the super-network.
         :param nncf_config: configuration used to create the super-network.
-        :param supernet_elasticity_path: path to file containing state information about the super-network.
-        :param supernet_weights_path: trained weights to resume the super-network.
-        :return: SuperNetwork with wrapped functionality.
+        :param supernet_elasticity_path: (not used in this subclass) path to file containing state information about
+            the super-network.
+        :param supernet_weights_path: (not used in this subclass) trained weights to resume the super-network.
+        :return: Shears super-network with wrapped functionality.
         """
         nncf_network = create_nncf_network(model, nncf_config)
         algo_name = nncf_config.get("bootstrapNAS", {}).get("training", {}).get("algorithm", "progressive_shrinking")
