@@ -3,7 +3,9 @@ import os
 
 import torch
 from peft import PeftModel
-from transformers import AutoModelForCausalLM, GenerationConfig, AutoTokenizer
+from transformers import AutoModelForCausalLM
+from transformers import AutoTokenizer
+from transformers import GenerationConfig
 
 
 def generate_prompt(instruction):
@@ -38,9 +40,16 @@ def main():
     tokenizer.pad_token_id = 0
 
     instructions = [
-        "Jack had $100. Sophia gave him 1/5 of her $100. How many dollars does Jack have now?",
-        "Edgar eats 18 pretzels a day. If his brother eats 1/2 as many, how many does his brother eat in a week?",
-        "Trent is 5 years older than Jane, and Jane is 3 years younger than Quinn. If Quinn is 30, how old is Trent?"
+        "Please choose the correct answer to the question: A cactus stem is used to store\n\nAnswer1: fruit "
+        "Answer2: liquid Answer3: food Answer4: spines\n\nAnswer format: answer1/answer2/answer3/answer4",
+
+        "Please choose the correct solution to the question: Prevent bottles from rolling in fridge.\n\n"
+        "Solution1: Put binder clip on fridge shelves to prevent sliding.\n\nSolution2: Put staple remover on "
+        "fridge shelves to prevent sliding.\n\nAnswer format: solution1/solution2",
+
+        "Please choose the correct answer to the question: Which characteristic describes the texture of a "
+        "kitten's fur?\n\nAnswer1: gray Answer2: warm Answer3: long Answer4: soft\n\nAnswer format: answer1/"
+        "answer2/answer3/answer4",
     ]
     for idx, instruction in enumerate(instructions):
         print(f"Example {idx}:")

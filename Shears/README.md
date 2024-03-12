@@ -55,7 +55,7 @@ Each Shears model contains the pretrained weights of the sparsified language mod
 Denote the path to the downloaded model as `SHEARS_PATH`.
 Below is an example of generating the instruction-following responses for some math reasoning samples:
 ```bash
-CUDA_VISIBLE_DEVICES=$DEVICES python example.py --model_path $SHEARS_PATH
+CUDA_VISIBLE_DEVICES=$DEVICES python example_math.py --model_path $SHEARS_PATH
 ```
 
 ### Training
