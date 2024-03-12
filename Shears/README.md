@@ -37,6 +37,9 @@ Here is an installation script developed from scratch for **Shears**.
 conda create -n shears -y python=3.10
 conda activate shears
 
+# install pytorch
+pip install torch==2.0.1
+
 # install dependencies
 bash install.sh
 ```
