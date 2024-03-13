@@ -54,8 +54,16 @@ Please clone/download our released models from [HuggingFace](https://huggingface
 git lfs install
 git clone https://huggingface.co/IntelLabs/shears-llama-7b-50-math-heuristic
 ```
-Each Shears model contains the pretrained weights of the sparsified language model and the weights of the fine-tuned adapters.
-Denote the path to the downloaded model as `SHEARS_PATH`.
+Each Shears model contains the pretrained weights of the sparsified language model (`base_model/`) and the weights of the fine-tuned adapters (`adapter_model/`).
+Denote the path to the downloaded model as `SHEARS_PATH`. The following code shows how to load the Shears model: 
+```python
+from transformers import AutoModelForCausalLM
+from peft import PeftModel
+
+base_model_path, adapter_model_path = f"{SHEARS_PATH}/base_model", f"{SHEARS_PATH}/adapter_model"
+base_model = AutoModelForCausalLM.from_pretrained(base_model_path)
+model = PeftModel.from_pretrained(base_model, adapter_model_path)
+```
 Below is an example of generating the instruction-following responses for some math reasoning samples:
 ```bash
 CUDA_VISIBLE_DEVICES=$DEVICES python example_math.py --model_path $SHEARS_PATH
@@ -121,10 +129,11 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
 To implement the elastic adapter, we apply the BootstrapNAS feature supported in [OpenVINO™ NNCF](https://github.com/openvinotoolkit/nncf), which provides a suite of compression algorithms for neural network optimization.
 Note that we use the stage LR scheduler in NNCF, so the learning rate is set in the NNCF config file instead of the `learning_rate` of `TrainingArguments`.
 
+After completing the training, the weights of the trained super-adapter will be obtained in the `output_dir` directory, corresponding to the `adapter_model` of our released super-network, while `model_name_or_path` corresponds to `base_model`.
 ### Evaluation
 
-The math evaluation datasets can be downloaded from [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters).
-We place them into the directory `datasets/`.
+All evaluation datasets can be downloaded from [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters).
+Place them into the directory `datasets/`.
 ```
 git clone https://github.com/AGI-Edgerunners/LLM-Adapters.git
 mv LLM-Adapters/dataset/ datasets/ 
@@ -147,6 +156,32 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
 ## Reproduce Results
 
 Please refer to `running_commands` for all commands related to reproducing the paper's results.
+
+- LLaMA with Math Reasoning tasks
+
+| Model                 | Sparsity    | GSM8K | AQuA  | MAWPS | SVAMP | Average |
+|-----------------------|-------------|-------|-------|-------|-------|---------|
+| LLaMA-7B-LoRA         | -           | 37.5  | 18.9  | 79.0  | 52.1  | 46.9    |
+| **LLaMA-7B-Shears**   | **40%**     | 36.8  | 19.7  | 83.2  | 47.7  | 46.9    |
+| **LLaMA-7B-Shears**   | **50%**     | 36.1  | 22.0  | 78.6  | 44.5  | 45.3    |
+| LLaMA-13B-LoRA        | -           | 47.5  | 18.5  | 83.6  | 54.6  | 51.1    |
+| **LLaMA-13B-Shears**  | **40%**     | 48.3  | 21.3  | 83.2  | 55.2  | 52.0    |
+| **LLaMA-13B-Shears**  | **50%**     | 45.1  | 22.0  | 83.2  | 53.3  | 50.9    |
+
+- MPT with GSM8K
+
+| Sparsity          | 0%    | 40%  | 50%  | 60%  | 70%    |
+|-------------------|-------|------|------|------|--------|
+| **MPT-7B-Shears** | 36.1  | 35.7 | 33.4 | 30.4 | 28.0   |
+
+- LLaMA with Commonsense Reasoning tasks
+
+| Model                | Sparsity  | BoolQ   | PIQA   | SIQA   | HellaSwag  | WinoG  | ARC-e  | ARC-c   | OBQA   | Average  |
+|----------------------|-----------|---------|--------|--------|------------|--------|--------|---------|--------|----------|
+| ChatGPT              | -         | 73.1    | 85.4   | 68.5   | 78.5       | 66.1   | 89.8   | 79.9    | 74.8   | 77.0     |
+| LLaMA-7B-LoRA	       | -         | 68.9    | 80.7   | 77.4   | 78.1       | 78.8   | 77.8   | 61.3    | 74.8   | 74.7     |
+| **LLaMA-7B-Shears**	 | **40%**   | 67.0    | 79.9   | 76.7   | 80.1       | 78.6   | 76.9   | 62.3    | 77.8   | 74.9     |
+| **LLaMA-7B-Shears**	 | **50%**   | 67.3    | 79.1   | 77.5   | 73.3       | 77.7   | 74.4   | 57.9    | 72.8   | 72.5     |
 
 ## Citation
 If you find our Shears code and paper helpful, please kindly cite:
