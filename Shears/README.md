@@ -170,9 +170,9 @@ Please refer to `running_commands` for all commands related to reproducing the p
 
 - MPT with GSM8K
 
-| Sparsity          | 0%    | 40%  | 50%  | 60%  | 70%    |
-|-------------------|-------|------|------|------|--------|
-| **MPT-7B-Shears** | 36.1  | 35.7 | 33.4 | 30.4 | 28.0   |
+| Sparsity | 0%    | 40%  | 50%  | 60%  | 70%  |
+|----------|-------|------|------|------|------|
+| Accuracy | 36.1  | 35.7 | 33.4 | 30.4 | 22.8 |
 
 - LLaMA with Commonsense Reasoning tasks
 
