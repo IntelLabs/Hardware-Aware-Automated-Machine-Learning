@@ -1,6 +1,7 @@
 from typing import TypeVar
 
 from nncf import NNCFConfig
+from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import ElasticityDim
 from nncf.experimental.torch.nas.bootstrapNAS.search.supernet import TrainedSuperNet
 from nncf.experimental.torch.nas.bootstrapNAS.training.model_creator_helpers import (
     create_compressed_model_from_algo_names,
@@ -23,7 +24,7 @@ class ShearsSuperNet(TrainedSuperNet):
         nncf_config: NNCFConfig,
         supernet_elasticity_path: str,
         supernet_weights_path: str,
-    ) -> "TrainedSuperNet":
+    ) -> "ShearsSuperNet":
         """
         Loads existing super-network weights and elasticity information, and creates the SuperNetwork interface.
 
@@ -39,5 +40,16 @@ class ShearsSuperNet(TrainedSuperNet):
         elasticity_ctrl, model = create_compressed_model_from_algo_names(
             nncf_network, nncf_config, algo_names=[algo_name]
         )
+        elasticity_ctrl.multi_elasticity_handler.enable_all()
         elasticity_ctrl.multi_elasticity_handler.activate_maximum_subnet()
-        return TrainedSuperNet(elasticity_ctrl, model)
+        return cls(elasticity_ctrl, model)
+
+    def activate_heuristic_subnet(self) -> None:
+        """
+        Activates the heuristic subnetwork in the super-network (only for width).
+        """
+        heuristic_config = {
+            k: v[(len(v) - 1) // 2] for k, v in self._m_handler.width_search_space.items()
+        }
+        heuristic_config = {ElasticityDim.WIDTH: heuristic_config}
+        self.activate_config(heuristic_config)

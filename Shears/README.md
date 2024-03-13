@@ -184,6 +184,11 @@ Please refer to `running_commands` for all commands related to reproducing the p
 | **LLaMA-7B-Shears**	 | **40%**   | 67.0    | 79.9   | 76.7   | 80.1       | 78.6   | 76.9   | 62.3    | 77.8   | 74.9     |
 | **LLaMA-7B-Shears**	 | **50%**   | 67.3    | 79.1   | 77.5   | 73.3       | 77.7   | 74.4   | 57.9    | 72.8   | 72.5     |
 
+## Explore a trained super-network
+
+To enhance exploration of the super-network trained using the Shears method, we provide an illustrative example `search/load_and_explore_supernet.ipynb`. This notebook demonstrates the direct loading of a Shears super-network and the extraction of various subnetworks from it. 
+This facilitates users in applying their own search algorithms and evaluation metrics to extract subnetworks tailored to their specific requirements.
+
 ## Citation
 If you find our Shears code and paper helpful, please kindly cite:
 ```bash
