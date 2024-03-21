@@ -48,5 +48,5 @@ More information about BootstrapNAS is available in our papers:
 ```
 
 ## Contributing to BootstrapNAS
-Please follow the contribution guidelines in [NNCF](https://github.com/openvinotoolkit/nncf) 
+Please follow the contribution guidelines in [NNCF](https://github.com/openvinotoolkit/nncf). 
 
