@@ -81,4 +81,4 @@ List of parameters that can be used in the configuration file:
 
 `ref_acc`: Defines the reference accuracy from the pre-trained model used to generate the super-network.
 
-*A full list of the possible configuration parameters can be found [here](https://github.com/jpablomch/nncf_bootstrapnas/blob/develop/nncf/config/experimental_schema.py).
+*A full list of the possible configuration parameters can be found [here](https://github.com/openvinotoolkit/nncf/blob/develop/nncf/config/experimental_schema.py).

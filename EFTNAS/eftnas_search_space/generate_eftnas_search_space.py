@@ -23,8 +23,10 @@ from nncf.torch.model_creation import create_nncf_network
 
 def get_argument_parser():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--source_config", type=str, help="nncf config before search space generation")
+    parser.add_argument("--model_name_or_path", type=str, help="base model")
     parser.add_argument("--importance_weight_dir", type=str, help="importance weight dir")
-    parser.add_argument("--config_save_name", type=str, help="nncf config after search space generation")
+    parser.add_argument("--target_config", type=str, help="nncf config after search space generation")
     args = parser.parse_args()
     return args
 
@@ -236,12 +238,12 @@ if __name__ == "__main__":
     cmin = 4400
     N = 5
     args = get_argument_parser()
-    # nncf config should include all possible blocks (both elastic depth and elastic width)--> search space will be generated based on those groups
-    template_nncf_config = load_nncf_config('./eftnas_configs/eftnas_search_space_demo.json')
-    sparsity_weight = os.path.join(args.importance_weight_dir, 'movement_sparsity_0/pytorch_model.bin')
+    # nncf config should include all possible blocks (both elastic depth and elastic width)
+    # --> search space will be generated based on those groups
+    template_nncf_config = load_nncf_config(args.source_config)
+    sparsity_weight = os.path.join(args.importance_weight_dir, 'pytorch_model.bin')
     assert os.path.exists(sparsity_weight), "importance weight dir is incorrect"
 
     ## overwrite some hyperparam in nncf config
-    search_space_gen = AutoSearchSpaceGenerator(template_nncf_config, "bert-base-uncased", sparsity_weight)
-    search_space_gen.generate_search_space(cmax, cmin, N, args.config_save_name)
-
+    search_space_gen = AutoSearchSpaceGenerator(template_nncf_config, args.model_name_or_path, sparsity_weight)
+    search_space_gen.generate_search_space(cmax, cmin, N, args.target_config)

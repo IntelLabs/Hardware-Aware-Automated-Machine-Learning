@@ -1,0 +1,52 @@
+diff --git a/src/transformers/modeling_utils.py b/src/transformers/modeling_utils.py
+index 45459ed22..4a647001c 100644
+--- a/src/transformers/modeling_utils.py
++++ b/src/transformers/modeling_utils.py
+@@ -3200,6 +3200,31 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+                 for p, f in weight_map.items()
+                 if param_device_map[p] == "disk"
+             }
++            
++        def module_reshape(state_dict):
++            for param_name, param in state_dict.items():
++                tensor_name = param_name
++                splits = tensor_name.split(".")
++                if len(splits) > 1:
++                    module = model_to_load
++                    parent = None
++                    for split in splits[:-1]:
++                        new_module = getattr(module, split)
++                        if new_module is None:
++                            raise ValueError(f"{module} has no attribute {split}.")
++                        parent = module
++                        module = new_module
++                    tensor_name = splits[-1]
++                    old_value = getattr(module, tensor_name)
++                    if old_value.shape != param.shape and isinstance(module, nn.Linear):
++                        new_module = torch.nn.Linear(
++                            param.shape[1],
++                            param.shape[0],
++                            bias=module.bias is not None,
++                            dtype=module.weight.dtype,
++                            device=module.weight.device
++                        )
++                        setattr(parent, splits[-2], new_module)
+ 
+         if state_dict is not None:
+             # Whole checkpoint
+@@ -3211,6 +3236,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+                 remove_prefix_from_model,
+                 ignore_mismatched_sizes,
+             )
++            module_reshape(state_dict)
+             error_msgs = _load_state_dict_into_model(model_to_load, state_dict, start_prefix)
+             offload_index = None
+         else:
+@@ -3255,6 +3281,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+                     remove_prefix_from_model,
+                     ignore_mismatched_sizes,
+                 )
++                module_reshape(state_dict)
+ 
+                 if low_cpu_mem_usage:
+                     new_error_msgs, offload_index, state_dict_index = _load_state_dict_into_meta_model(

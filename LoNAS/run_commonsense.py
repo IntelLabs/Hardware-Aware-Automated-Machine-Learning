@@ -17,35 +17,24 @@ from datasets import load_dataset
 from peft import LoraConfig
 from peft import PeftModel
 from peft import get_peft_model
-from tqdm import tqdm
 from transformers import AutoModelForCausalLM
 from transformers import AutoTokenizer
 from transformers import GenerationConfig
 from transformers import HfArgumentParser
-from transformers import LlamaTokenizer
 from transformers import Trainer
 from transformers import TrainingArguments
 from transformers import set_seed
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version
-from transformers.utils import send_example_telemetry
-from transformers.utils.versions import require_version
 
 from nncf import NNCFConfig
 from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import ElasticityDim
 from nncf.experimental.torch.nas.bootstrapNAS.training.model_creator_helpers import (
     create_compressed_model_from_algo_names,
 )
-from nncf.torch.layers import NNCFLinear
 from nncf.torch.model_creation import create_nncf_network
-from nncf.torch.module_operations import UpdateWeight
-from nncf.torch.module_operations import UpdateWeightAndOptionalBias
 
-# Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.31.0")
-
-require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/text-classification/requirements.txt")
-
 logger = logging.getLogger(__name__)
 TEST_DATASETS = ["boolq", "piqa", "social_i_qa", "winogrande", "ARC-Easy", "ARC-Challenge", "openbookqa", "hellaswag"]
 
@@ -182,23 +171,12 @@ class ModelArguments:
 
 
 def main():
-    # See all possible arguments in src/transformers/training_args.py
-    # or by passing the --help flag to this script.
-    # We now keep distinct sets of args, for a cleaner separation of concerns.
-
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, LonasTrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-        # If we pass only one argument to the script and it's the path to a json file,
-        # let's parse it to get our arguments.
         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
-    # information sent is the one passed as arguments along with your Python/PyTorch versions.
-    send_example_telemetry("run_glue", model_args, data_args)
-
-    # Setup logging
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
@@ -206,7 +184,6 @@ def main():
     )
 
     if training_args.should_log:
-        # The default of training_args.log_level is passive, so we set log level at info here to have that default.
         transformers.utils.logging.set_verbosity_info()
 
     log_level = training_args.get_process_log_level()
@@ -285,18 +262,13 @@ def main():
             nncf_network, nncf_config, algo_names=[algo_name]
         )
 
-    # load tokenizer
-    if "llama" in model_args.model_name_or_path:
-        tokenizer = LlamaTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
-    else:
-        tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
-    tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos token
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
+    tokenizer.pad_token_id = 0
     tokenizer.padding_side = "left"  # Allow batched inference
 
     # Load data
     def tokenize(prompt, add_eos_token=True):
-        # there's probably a way to do this with the tokenizer settings
-        # but again, gotta move fast
         result = tokenizer(
             prompt,
             truncation=True,
@@ -318,7 +290,6 @@ def main():
         return result
 
     def generate_prompt(data_point):
-        # sorry about the formatting disaster gotta move fast
         if data_point["input"]:
             return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request. 
 
@@ -329,7 +300,7 @@ def main():
                     {data_point["input"]}
 
                     ### Response:
-                    {data_point["output"]}"""  # noqa: E501
+                    {data_point["output"]}"""
         else:
             return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request.  
 
@@ -337,7 +308,7 @@ def main():
                     {data_point["instruction"]}
 
                     ### Response:
-                    {data_point["output"]}"""  # noqa: E501
+                    {data_point["output"]}"""
 
     def generate_and_tokenize_prompt(data_point):
         full_prompt = generate_prompt(data_point)
@@ -508,7 +479,7 @@ def main():
         total = len(dataset)
         correct = 0
         output_data = []
-        for idx, data in tqdm(enumerate(dataset)):
+        for idx, data in enumerate(dataset):
             instruction = data.get("instruction")
             output = evaluate_one_sample(instruction, model=model)
             label = data.get("answer")
@@ -560,7 +531,6 @@ def main():
         trainer.save_metrics("eval", metrics)
         trainer.log_metrics("eval", metrics)
 
-    # test accuracy (heuristic)
     if training_args.do_test and training_args.local_rank <= 0:
         if compression_ctrl is not None:
             trainer.compression_ctrl.multi_elasticity_handler.enable_all()
@@ -571,9 +541,8 @@ def main():
             }
             heuristic_config = {ElasticityDim.WIDTH: heuristic_config}
             trainer.compression_ctrl.multi_elasticity_handler.activate_subnet_for_config(heuristic_config)
-            test_subnetwork(trainer.model, "heuristic")
+            test_subnetwork(trainer.model, "Heuristic")
         else:
-            # LoRA
             all_results = []
             for test_dataset in TEST_DATASETS:
                 logger.info(f"*** Evaluation on {test_dataset} ***")

@@ -1,0 +1,218 @@
+{
+    "input_info": [
+        {
+            "sample_size": [1, 128],
+            "type": "long",
+            "keyword": "input_ids"
+        },
+        {
+            "sample_size": [1, 128],
+            "type": "long",
+            "keyword": "token_type_ids"
+        },
+        {
+            "sample_size": [1, 128],
+            "type": "long",
+            "keyword": "attention_mask"
+        }
+    ],
+    "bootstrapNAS": {
+        "training": {
+            "algorithm": "progressive_shrinking",
+            "frozen_layers_allowed": true,
+            "progressivity_of_elasticity": ["width"],
+            "batchnorm_adaptation": {
+                "num_bn_adaptation_samples": 0
+            },
+            "schedule": {
+                "list_stage_descriptions": [
+                    {"train_dims": ["width"], "epochs": 60, "depth_indicator": 1, "width_indicator": 4, "init_lr": 3e-4, "epochs_lr": 60, "sample_rate": 1}
+                ]
+            },
+            "elasticity": {
+                "available_elasticity_dims": ["width"],
+                "width": {
+                    "overwrite_groups": [
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[8]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[8]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[8]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[8]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[8]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[9]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[9]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[9]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[9]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[9]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[10]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[10]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[10]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[10]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[10]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[11]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[11]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[11]/BertAttention[attention]/BertSelfAttention[self]/NNCFLinear[key]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[11]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/NNCFUserSelfLinear[self_linear]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[11]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_B]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[8]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[8]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[9]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[9]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[10]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[10]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                        ],
+                        [
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[11]/BertAttention[attention]/BertSelfAttention[self]/Linear[query]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[11]/BertAttention[attention]/BertSelfAttention[self]/Linear[value]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                        ],
+                        ["PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[8]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[9]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[10]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"],
+                        ["PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[11]/BertIntermediate[intermediate]/NNCFLinear[dense]/linear_0"]
+                    ],
+                    "overwrite_groups_widths": [
+                        [768, 384], [768, 320], [768, 256], [768, 512], [768, 512], [768, 704],
+                        [768, 576], [768, 576], [768, 640], [768, 192], [768, 704, 192], [768, 320],
+                        [8, 4, 2], [8, 4, 2], [8, 4, 2], [8, 4, 2], [8, 4, 2], [8, 4, 2],
+                        [8, 4, 2], [8, 4, 2], [8, 4, 2], [8, 4, 2], [8, 4, 2], [8, 4, 2],
+                        [3072, 2634, 216], [3072, 2634, 181], [3072, 2627, 208], [3072, 2676, 226], [3072, 2628, 179], [3072, 2662, 175],
+                        [3072, 2706, 182], [3072, 2687, 169], [3072, 2616, 165], [3072, 2400, 160], [3072, 2198, 163], [3072, 1940, 150]
+                    ],
+                    "add_dynamic_inputs": [
+                        "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[0]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[1]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[2]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[3]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[4]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[5]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[6]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[7]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[8]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[9]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[10]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0",
+                        "PeftModelForSequenceClassification/LoraModel[base_model]/BertForSequenceClassification[model]/BertModel[bert]/BertEncoder[encoder]/ModuleList[layer]/BertLayer[11]/BertAttention[attention]/BertSelfOutput[output]/NNCFLinear[dense]/linear_0"
+                    ]
+                }
+            },
+            "sandwich_rule": false
+        },
+        "search": {
+            "algorithm": "NSGA2",
+            "batchnorm_adaptation": {
+                "num_bn_adaptation_samples": 0
+            },
+            "num_evals": 1000,
+            "population": 40,
+            "ref_acc": 0.85,
+            "acc_delta": 0.01
+        }
+    }
+}

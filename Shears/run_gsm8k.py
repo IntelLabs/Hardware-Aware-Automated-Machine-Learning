@@ -13,6 +13,7 @@ from typing import Optional
 import datasets
 import torch
 import transformers
+from datasets import Dataset
 from datasets import load_dataset
 from peft import LoraConfig
 from peft import PeftModel
@@ -22,33 +23,30 @@ from transformers import AutoModelForCausalLM
 from transformers import AutoTokenizer
 from transformers import GenerationConfig
 from transformers import HfArgumentParser
-from transformers import LlamaTokenizer
 from transformers import Trainer
 from transformers import TrainingArguments
 from transformers import set_seed
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version
-from transformers.utils import send_example_telemetry
-from transformers.utils.versions import require_version
 
 from nncf import NNCFConfig
 from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import ElasticityDim
 from nncf.experimental.torch.nas.bootstrapNAS.training.model_creator_helpers import (
     create_compressed_model_from_algo_names,
 )
+from nncf.torch.layers import NNCFLinear
 from nncf.torch.model_creation import create_nncf_network
+from nncf.torch.module_operations import UpdateWeight
+from nncf.torch.module_operations import UpdateWeightAndOptionalBias
 
-# Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.31.0")
-
-require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/text-classification/requirements.txt")
-
 logger = logging.getLogger(__name__)
-TEST_DATASETS = ["AQuA", "mawps", "gsm8k", "SVAMP"]
+ANS_RE = re.compile(r"#### (\-?[0-9\.\,]+)")
+INVALID_ANS = "[invalid]"
 
 
 @dataclass
-class LonasTrainingArguments(TrainingArguments):
+class ShearsTrainingArguments(TrainingArguments):
     lora_r: int = field(default=32, metadata={"help": "Lora R dimension."})
     lora_alpha: float = field(default=64, metadata={"help": " Lora alpha."})
     lora_dropout: float = field(default=0.0, metadata={"help": "Lora dropout."})
@@ -179,23 +177,12 @@ class ModelArguments:
 
 
 def main():
-    # See all possible arguments in src/transformers/training_args.py
-    # or by passing the --help flag to this script.
-    # We now keep distinct sets of args, for a cleaner separation of concerns.
-
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, LonasTrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ShearsTrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-        # If we pass only one argument to the script and it's the path to a json file,
-        # let's parse it to get our arguments.
         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
-    # information sent is the one passed as arguments along with your Python/PyTorch versions.
-    send_example_telemetry("run_glue", model_args, data_args)
-
-    # Setup logging
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
@@ -203,7 +190,6 @@ def main():
     )
 
     if training_args.should_log:
-        # The default of training_args.log_level is passive, so we set log level at info here to have that default.
         transformers.utils.logging.set_verbosity_info()
 
     log_level = training_args.get_process_log_level()
@@ -220,7 +206,7 @@ def main():
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
-    # Detecting last checkpoint.
+    # Detecting last checkpoint
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
@@ -235,10 +221,10 @@ def main():
                 "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
             )
 
-    # Set seed before initializing model.
+    # Set seed before initializing model
     set_seed(training_args.seed)
 
-    # load model
+    # Load model
     model = AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         load_in_8bit=False,
@@ -282,11 +268,8 @@ def main():
             nncf_network, nncf_config, algo_names=[algo_name]
         )
 
-    # load tokenizer
-    if "llama" in model_args.model_name_or_path:
-        tokenizer = LlamaTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
-    else:
-        tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
     tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos token
 
     # Load data
@@ -314,26 +297,13 @@ def main():
         return result
 
     def generate_prompt(data_point):
-        # sorry about the formatting disaster gotta move fast
-        if data_point["input"]:
-            return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request. 
+        return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request.  
 
-                    ### Instruction:
-                    {data_point["instruction"]}
+                ### Instruction:
+                {data_point["instruction"]}
 
-                    ### Input:
-                    {data_point["input"]}
-
-                    ### Response:
-                    {data_point["output"]}"""
-        else:
-            return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request.  
-
-                    ### Instruction:
-                    {data_point["instruction"]}
-
-                    ### Response:
-                    {data_point["output"]}"""
+                ### Response:
+                {data_point["output"]}"""
 
     def generate_and_tokenize_prompt(data_point):
         full_prompt = generate_prompt(data_point)
@@ -348,17 +318,42 @@ def main():
             ]
         return tokenized_full_prompt
 
+    def extract_answer(completion):
+        match = ANS_RE.search(completion)
+        if match:
+            match_str = match.group(1).strip()
+            match_str = match_str.replace(",", "")
+            return match_str
+        else:
+            return INVALID_ANS
+
+    def get_examples(split="train"):
+        # Load the GSM8K dataset from Hugging Face
+        examples = load_dataset("gsm8k", "main", split=split)
+
+        processed = []
+        for ex in examples:
+            item = {
+                "instruction": ex["question"],
+                "output": ex["answer"].replace("\n", " ").replace("####", "The answer is"),
+                "answer": extract_answer(ex["answer"]),
+            }
+            processed.append(item)
+
+        return processed
+
     train_dataset, eval_dataset = None, None
     if training_args.do_train or training_args.do_search:
-        data = load_dataset("json", data_files=data_args.dataset_path)
+        train_examples = get_examples("train")
+        data = Dataset.from_list(train_examples, split="train")
 
         val_set_size = data_args.val_set_size
         if val_set_size > 0:
-            train_val = data["train"].train_test_split(test_size=val_set_size, shuffle=True, seed=42)
+            train_val = data.train_test_split(test_size=val_set_size, shuffle=True, seed=42)
             train_dataset = train_val["train"].shuffle().map(generate_and_tokenize_prompt)
             eval_dataset = train_val["test"].shuffle().map(generate_and_tokenize_prompt)
         else:
-            train_dataset = data["train"].shuffle().map(generate_and_tokenize_prompt)
+            train_dataset = data.shuffle().map(generate_and_tokenize_prompt)
             eval_dataset = None
 
     # Initialize our Trainer
@@ -399,16 +394,12 @@ def main():
         trainer.save_metrics("train", metrics)
         trainer.save_state()
 
-    def extract_answer_number(dataset, sentence: str) -> float:
-        dataset = dataset.lower()
-        if dataset in ["gsm8k", "svamp", "mawps"]:
-            sentence = sentence.replace(",", "")
-            pred = [s for s in re.findall(r"-?\d+\.?\d*", sentence)]
-            if not pred:
-                return float("inf")
-            pred_answer = float(pred[-1])
-        else:
-            raise NotImplementedError(" not support dataset: {}".format(dataset))
+    def extract_answer_number(sentence: str) -> float:
+        sentence = sentence.replace(",", "")
+        pred = [s for s in re.findall(r"-?\d+\.?\d*", sentence)]
+        if not pred:
+            return float("inf")
+        pred_answer = float(pred[-1])
         if isinstance(pred_answer, str):
             try:
                 pred_answer = float(pred_answer)
@@ -416,50 +407,17 @@ def main():
                 pred_answer = float("inf")
         return pred_answer
 
-    def extract_answer_letter(sentence: str) -> str:
-        sentence_ = sentence.strip()
-        pred_answers = re.findall(r"A|B|C|D|E", sentence_)
-        if pred_answers:
-            if not pred_answers:
-                return ""
-            return pred_answers[0]
-        else:
-            return ""
+    def generate_prompt_eval(instruction):
+        return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request. 
 
-    def load_test_data(test_dataset) -> list:
-        """
-        read data from dataset file
-        """
-        file_path = f"datasets/{test_dataset}/test.json"
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"can not find dataset file : {file_path}")
-        json_data = json.load(open(file_path, "r"))
-        return json_data
+                        ### Instruction:
+                        {instruction}
 
-    def generate_prompt_eval(instruction, input=None):
-        if input:
-            return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
-
-                            ### Instruction:
-                            {instruction}
-
-                            ### Input:
-                            {input}
-
-                            ### Response:
-                            """
-        else:
-            return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request. 
-
-                            ### Instruction:
-                            {instruction}
-
-                            ### Response:
-                            """
+                        ### Response:
+                        """
 
     def evaluate_one_sample(
         instruction,
-        input=None,
         model=None,
         temperature=0.1,
         top_p=0.75,
@@ -468,7 +426,7 @@ def main():
         max_new_tokens=256,
         **kwargs,
     ):
-        prompt = generate_prompt_eval(instruction, input)
+        prompt = generate_prompt_eval(instruction)
         inputs = tokenizer(prompt, return_tensors="pt")
         input_ids = inputs["input_ids"].to(model.device)
         generation_config = GenerationConfig(
@@ -491,9 +449,9 @@ def main():
         output = tokenizer.decode(s)
         return output.split("### Response:")[1].strip()
 
-    def evaluate(model, dataset_name, save_file):
+    def evaluate(model, save_file):
         model.eval()
-        dataset = load_test_data(dataset_name)
+        dataset = get_examples("test")
         total = len(dataset)
 
         correct = 0
@@ -504,18 +462,12 @@ def main():
             outputs = evaluate_one_sample(instruction, model=model)
             label = data.get("answer")
             flag = False
-            if dataset_name.lower() in ["aqua"]:
-                predict = extract_answer_letter(outputs)
-                if label == predict:
-                    correct += 1
-                    flag = True
-            else:
-                if isinstance(label, str):
-                    label = float(label)
-                predict = extract_answer_number(dataset_name, outputs)
-                if abs(label - predict) <= miss:
-                    correct += 1
-                    flag = True
+            if isinstance(label, str):
+                label = float(label)
+            predict = extract_answer_number(outputs)
+            if abs(label - predict) <= miss:
+                correct += 1
+                flag = True
             new_data = copy.deepcopy(data)
             new_data["output_pred"] = outputs
             new_data["pred"] = predict
@@ -528,36 +480,103 @@ def main():
             logger.info(f"\rtest:{idx + 1}/{total} | accuracy {correct}  {correct / (idx + 1)}")
             with open(save_file, "w+") as f:
                 json.dump(output_data, f, indent=4)
-
         acc = correct / total
         return acc
 
+    def check_lora_sparsity(model):
+        def find_layers(module, layers=[torch.nn.Linear], name=""):
+            """
+            Recursively find the layers of a certain type in a module.
+
+            Args:
+                module (nn.Module): PyTorch module.
+                layers (list): List of layer types to find.
+                name (str): Name of the module.
+
+            Returns:
+                dict: Dictionary of layers of the given type(s) within the module.
+            """
+            if type(module) in layers:
+                return {name: module}
+            res = {}
+            for name1, child in module.named_children():
+                res.update(find_layers(child, layers=layers, name=name + "." + name1 if name != "" else name1))
+            return res
+
+        layers = model.base_model.model.transformer.blocks  # mpt
+        count = 0
+        total_params = 0
+        for i in range(len(layers)):
+            layer = layers[i]
+            subset = find_layers(layer)
+
+            sub_count = 0
+            sub_params = 0
+            for name in subset:
+                W = subset[name].weight.data
+                count += (W == 0).sum().item()
+                total_params += W.numel()
+
+                sub_count += (W == 0).sum().item()
+                sub_params += W.numel()
+
+            print(f"layer {i} sparsity {float(sub_count) / sub_params:.6f}")
+
+        return float(count) / total_params
+
+    def check_shears_sparsity(model):
+        def find_layers(module, layers=[NNCFLinear], name=""):
+            if type(module) in layers or type(module).__name__ == "NNCFUserSelfLinear":
+                return {name: module}
+            res = {}
+            for name1, child in module.named_children():
+                res.update(find_layers(child, layers=layers, name=name + "." + name1 if name != "" else name1))
+            return res
+
+        layers = model.base_model.model.transformer.blocks  # mpt
+
+        count = 0
+        total_params = 0
+        for i in range(len(layers)):
+            layer = layers[i]
+            subset = find_layers(layer)
+
+            for name in subset:
+                W = subset[name].weight.data
+                total_params += W.numel()
+                pruned_output_width, pruned_input_width = W.shape
+                for id, ops in subset[name].pre_ops.items():
+                    if type(ops) == UpdateWeight:
+                        pruned_input_width = ops.op.get_active_width()
+                    elif type(ops) == UpdateWeightAndOptionalBias:
+                        pruned_output_width = ops.op.get_active_width()
+                pruned_W = W[:pruned_output_width, :pruned_input_width]
+                count += (pruned_W != 0).sum().item()
+
+        sparsity = 1 - float(count) / total_params
+        return sparsity
+
     def test_subnetwork(subnetwork, name):
         logger.info(f"*** Evaluation - {name} ***")
+        sparsity = check_shears_sparsity(subnetwork)
         non_zero_params = sum([(param.data != 0).sum().item() for _, param in subnetwork.named_parameters()])
         macs, weights = trainer.compression_ctrl.multi_elasticity_handler.count_flops_and_weights_for_active_subnet()
         metrics = {
             f"{name}_non_zero_params": non_zero_params,
+            f"{name}_sparsity": sparsity,
             f"{name}_macs": str(macs / 2000000),
             f"{name}_weights": str(weights),
         }
         trainer.save_metrics("eval", metrics)
         trainer.log_metrics("eval", metrics)
 
-        all_results = []
         metrics = {}
-        for test_dataset in TEST_DATASETS:
-            logger.info(f"*** Evaluation on {test_dataset} ***")
-            save_file = os.path.join(training_args.output_dir, f"{name}.{test_dataset}.res.json")
-            accuracy = evaluate(subnetwork, test_dataset, save_file)
-            all_results.append(accuracy)
-            metrics[f"{name}_{test_dataset}_accuracy"] = accuracy
-            trainer.save_metrics("eval", metrics)
-        metrics[f"{name}_avg_accuracy"] = sum(all_results) / len(all_results)
+        save_file = os.path.join(training_args.output_dir, f"{name}.res.json")
+        accuracy = evaluate(subnetwork, save_file)
+        metrics[f"{name}_accuracy"] = accuracy
         trainer.save_metrics("eval", metrics)
         trainer.log_metrics("eval", metrics)
 
-    # test accuracy (heuristic)
     if training_args.do_test and training_args.local_rank <= 0:
         if compression_ctrl is not None:
             trainer.compression_ctrl.multi_elasticity_handler.enable_all()
@@ -568,26 +587,19 @@ def main():
             }
             heuristic_config = {ElasticityDim.WIDTH: heuristic_config}
             trainer.compression_ctrl.multi_elasticity_handler.activate_subnet_for_config(heuristic_config)
-            test_subnetwork(trainer.model, "heuristic")
+            test_subnetwork(trainer.model, "Heuristic")
         else:
-            # LoRA
-            all_results = []
-            for test_dataset in TEST_DATASETS:
-                logger.info(f"*** Evaluation on {test_dataset} ***")
-                save_file = os.path.join(training_args.output_dir, f"{test_dataset}.res.json")
-                non_zero_params = sum([(param.data != 0).sum().item() for _, param in trainer.model.named_parameters()])
-                accuracy = evaluate(trainer.model, test_dataset, save_file)
-                all_results.append(accuracy)
-                metrics = {
-                    f"{test_dataset}_accuracy": accuracy,
-                    "non_zero_params": non_zero_params,
-                }
-                trainer.save_metrics("eval", metrics)
-            avg_metrics = {
-                "avg_accuracy": sum(all_results) / len(all_results),
+            save_file = os.path.join(training_args.output_dir, "res.json")
+            sparsity = check_lora_sparsity(trainer.model)
+            non_zero_params = sum([(param.data != 0).sum().item() for _, param in trainer.model.named_parameters()])
+            accuracy, inference_time = evaluate(trainer.model, save_file)
+            metrics = {
+                "accuracy": accuracy,
+                "non_zero_params": non_zero_params,
+                "sparsity": sparsity,
             }
-            trainer.save_metrics("eval", avg_metrics)
-            trainer.log_metrics("eval", avg_metrics)
+            trainer.save_metrics("eval", metrics)
+            trainer.log_metrics("eval", metrics)
 
     kwargs = {"finetuned_from": model_args.model_name_or_path}
 
