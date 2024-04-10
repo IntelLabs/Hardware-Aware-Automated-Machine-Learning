@@ -1,0 +1,43 @@
+diff --git a/attention.py b/attention.py
+index 5cc3be7..6c6e308 100644
+--- a/attention.py
++++ b/attention.py
+@@ -242,9 +242,15 @@ class GroupedQueryAttention(nn.Module):
+         fc_kwargs: dict[str, Any] = {'bias': bias}
+         if fc_type != 'te':
+             fc_kwargs['device'] = device
+-        self.Wqkv = FC_CLASS_REGISTRY[fc_type](self.d_model, self.d_model + 2 * self.kv_n_heads * self.head_dim, **fc_kwargs)
+-        fuse_splits = [i * self.head_dim for i in range(1, self.n_heads + 2 * self.kv_n_heads)]
+-        self.Wqkv._fused = (0, fuse_splits)
++        
++        # Separating QKV brings more flexibility for pruning.
++        # self.Wqkv = FC_CLASS_REGISTRY[fc_type](self.d_model, self.d_model + 2 * self.kv_n_heads * self.head_dim, **fc_kwargs)
++        # fuse_splits = [i * self.head_dim for i in range(1, self.n_heads + 2 * self.kv_n_heads)]
++        # self.Wqkv._fused = (0, fuse_splits)
++        self.q_proj = FC_CLASS_REGISTRY[fc_type](self.d_model, self.d_model, **fc_kwargs)
++        self.k_proj = FC_CLASS_REGISTRY[fc_type](self.d_model, self.kv_n_heads * self.head_dim, **fc_kwargs)
++        self.v_proj = FC_CLASS_REGISTRY[fc_type](self.d_model, self.kv_n_heads * self.head_dim, **fc_kwargs)
++        
+         if self.qk_ln:
+             norm_class = NORM_CLASS_REGISTRY[norm_type.lower()]
+             self.q_ln = norm_class(self.d_model, device=device)
+@@ -261,10 +267,16 @@ class GroupedQueryAttention(nn.Module):
+         self.out_proj._is_residual = True
+ 
+     def forward(self, x: torch.Tensor, past_key_value: Optional[Tuple[torch.Tensor, torch.Tensor]]=None, attn_bias: Optional[torch.Tensor]=None, attention_mask: Optional[torch.Tensor]=None, is_causal: bool=True, needs_weights: bool=False) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+-        qkv = self.Wqkv(x)
++        # qkv = self.Wqkv(x)
++        # if self.clip_qkv:
++        #   qkv = qkv.clamp(min=-self.clip_qkv, max=self.clip_qkv)
++        # (query, key, value) = qkv.split([self.d_model, self.kv_n_heads * self.head_dim, self.kv_n_heads * self.head_dim], dim=2)
++        query, key, value = self.q_proj(x), self.k_proj(x), self.v_proj(x)
+         if self.clip_qkv:
+-            qkv = qkv.clamp(min=-self.clip_qkv, max=self.clip_qkv)
+-        (query, key, value) = qkv.split([self.d_model, self.kv_n_heads * self.head_dim, self.kv_n_heads * self.head_dim], dim=2)
++          query = query.clamp(min=-self.clip_qkv, max=self.clip_qkv)
++          key = key.clamp(min=-self.clip_qkv, max=self.clip_qkv)
++          value = value.clamp(min=-self.clip_qkv, max=self.clip_qkv)
++            
+         key_padding_mask = attention_mask
+         if self.qk_ln:
+             dtype = query.dtype

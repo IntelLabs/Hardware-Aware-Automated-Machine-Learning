@@ -1,0 +1,44 @@
+diff --git a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elasticity_builder.py b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elasticity_builder.py
+index bc6464b2..9f7a2f3d 100644
+--- a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elasticity_builder.py
++++ b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elasticity_builder.py
+@@ -9,7 +9,7 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ from collections import OrderedDict
+-from typing import Any, Dict, List
++from typing import Any, Dict, List, Tuple
+
+ from nncf import NNCFConfig
+ from nncf.experimental.torch.nas.bootstrapNAS.elasticity.base_handler import SingleElasticityBuilder
+@@ -152,3 +152,8 @@ class ElasticityBuilder(PTCompressionAlgorithmBuilder):
+
+         # No conflict resolving with the related config options, parameters are overridden by compression state
+         self._available_elasticity_dims = list(map(ElasticityDim, available_elasticity_dims_state))
++
++    def _are_frozen_layers_allowed(self) -> Tuple[bool, str]:
++        if self.config.get("bootstrapNAS", {}).get("training", {}).get("frozen_layers_allowed", False):
++            return True, "Frozen layers are allowed (set in NNCF config)"
++        return super()._are_frozen_layers_allowed()
+diff --git a/nncf/experimental/torch/nas/bootstrapNAS/training/progressive_shrinking_builder.py b/nncf/experimental/torch/nas/bootstrapNAS/training/progressive_shrinking_builder.py
+index 92609327..fefdc2f6 100644
+--- a/nncf/experimental/torch/nas/bootstrapNAS/training/progressive_shrinking_builder.py
++++ b/nncf/experimental/torch/nas/bootstrapNAS/training/progressive_shrinking_builder.py
+@@ -8,7 +8,7 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+-from typing import Any, Dict, List
++from typing import Any, Dict, List, Tuple
+ 
+ from nncf import NNCFConfig
+ from nncf.common.initialization.batchnorm_adaptation import BatchnormAdaptationAlgorithm
+@@ -152,3 +152,8 @@ class ProgressiveShrinkingBuilder(PTCompressionAlgorithmBuilder):
+         self._bn_adapt_params = state_without_name[self._state_names.BN_ADAPTATION_PARAMS]
+         bn_adapt_algo_kwargs = get_bn_adapt_algo_kwargs(self.config, self._bn_adapt_params)
+         self._bn_adaptation = BatchnormAdaptationAlgorithm(**bn_adapt_algo_kwargs) if bn_adapt_algo_kwargs else None
++
++    def _are_frozen_layers_allowed(self) -> Tuple[bool, str]:
++        if self._algo_config.get("frozen_layers_allowed", False):
++            return True, "Frozen layers are allowed (set in NNCF config)"
++        return super()._are_frozen_layers_allowed()

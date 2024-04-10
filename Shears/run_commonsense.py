@@ -17,38 +17,33 @@ from datasets import load_dataset
 from peft import LoraConfig
 from peft import PeftModel
 from peft import get_peft_model
-from tqdm import tqdm
 from transformers import AutoModelForCausalLM
 from transformers import AutoTokenizer
 from transformers import GenerationConfig
 from transformers import HfArgumentParser
-from transformers import LlamaTokenizer
 from transformers import Trainer
 from transformers import TrainingArguments
 from transformers import set_seed
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version
-from transformers.utils import send_example_telemetry
-from transformers.utils.versions import require_version
 
 from nncf import NNCFConfig
 from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import ElasticityDim
 from nncf.experimental.torch.nas.bootstrapNAS.training.model_creator_helpers import (
     create_compressed_model_from_algo_names,
 )
+from nncf.torch.layers import NNCFLinear
 from nncf.torch.model_creation import create_nncf_network
+from nncf.torch.module_operations import UpdateWeight
+from nncf.torch.module_operations import UpdateWeightAndOptionalBias
 
-# Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.31.0")
-
-require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/text-classification/requirements.txt")
-
 logger = logging.getLogger(__name__)
-TEST_DATASETS = ["AQuA", "mawps", "gsm8k", "SVAMP"]
+TEST_DATASETS = ["boolq", "piqa", "social_i_qa", "winogrande", "ARC-Easy", "ARC-Challenge", "openbookqa", "hellaswag"]
 
 
 @dataclass
-class LonasTrainingArguments(TrainingArguments):
+class ShearsTrainingArguments(TrainingArguments):
     lora_r: int = field(default=32, metadata={"help": "Lora R dimension."})
     lora_alpha: float = field(default=64, metadata={"help": " Lora alpha."})
     lora_dropout: float = field(default=0.0, metadata={"help": "Lora dropout."})
@@ -58,6 +53,7 @@ class LonasTrainingArguments(TrainingArguments):
     lora: bool = field(default=False, metadata={"help": "Whether to apply lora or not."})
     train_on_inputs: bool = field(default=True)
     do_test: bool = field(default=False)
+    test_specific_config: bool = field(default=False)
 
 
 @dataclass
@@ -74,7 +70,7 @@ class DataTrainingArguments:
     dataset_config_name: Optional[str] = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
     )
-    val_set_size: int = field(default=0)
+    val_set_size: int = field(default=120)
     max_seq_length: int = field(
         default=128,
         metadata={
@@ -179,23 +175,12 @@ class ModelArguments:
 
 
 def main():
-    # See all possible arguments in src/transformers/training_args.py
-    # or by passing the --help flag to this script.
-    # We now keep distinct sets of args, for a cleaner separation of concerns.
-
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, LonasTrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ShearsTrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-        # If we pass only one argument to the script and it's the path to a json file,
-        # let's parse it to get our arguments.
         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
-    # information sent is the one passed as arguments along with your Python/PyTorch versions.
-    send_example_telemetry("run_glue", model_args, data_args)
-
-    # Setup logging
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
@@ -203,7 +188,6 @@ def main():
     )
 
     if training_args.should_log:
-        # The default of training_args.log_level is passive, so we set log level at info here to have that default.
         transformers.utils.logging.set_verbosity_info()
 
     log_level = training_args.get_process_log_level()
@@ -220,7 +204,7 @@ def main():
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
-    # Detecting last checkpoint.
+    # Detecting last checkpoint
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
@@ -238,7 +222,7 @@ def main():
     # Set seed before initializing model.
     set_seed(training_args.seed)
 
-    # load model
+    # Load model
     model = AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         load_in_8bit=False,
@@ -249,7 +233,7 @@ def main():
     )
 
     if training_args.lora and model_args.lora_weights is None:
-        logger.info("Adding LoRA modules...")
+        logger.info("adding LoRA modules...")
         config = LoraConfig(
             r=training_args.lora_r,
             lora_alpha=training_args.lora_alpha,
@@ -282,17 +266,13 @@ def main():
             nncf_network, nncf_config, algo_names=[algo_name]
         )
 
-    # load tokenizer
-    if "llama" in model_args.model_name_or_path:
-        tokenizer = LlamaTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
-    else:
-        tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
-    tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos token
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
+    tokenizer.pad_token_id = 0
+    tokenizer.padding_side = "left"  # Allow batched inference
 
     # Load data
     def tokenize(prompt, add_eos_token=True):
-        # there's probably a way to do this with the tokenizer settings
-        # but again, gotta move fast
         result = tokenizer(
             prompt,
             truncation=True,
@@ -314,7 +294,6 @@ def main():
         return result
 
     def generate_prompt(data_point):
-        # sorry about the formatting disaster gotta move fast
         if data_point["input"]:
             return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request. 
 
@@ -399,32 +378,38 @@ def main():
         trainer.save_metrics("train", metrics)
         trainer.save_state()
 
-    def extract_answer_number(dataset, sentence: str) -> float:
-        dataset = dataset.lower()
-        if dataset in ["gsm8k", "svamp", "mawps"]:
-            sentence = sentence.replace(",", "")
-            pred = [s for s in re.findall(r"-?\d+\.?\d*", sentence)]
-            if not pred:
-                return float("inf")
-            pred_answer = float(pred[-1])
-        else:
-            raise NotImplementedError(" not support dataset: {}".format(dataset))
-        if isinstance(pred_answer, str):
-            try:
-                pred_answer = float(pred_answer)
-            except ValueError as e:
-                pred_answer = float("inf")
-        return pred_answer
-
-    def extract_answer_letter(sentence: str) -> str:
-        sentence_ = sentence.strip()
-        pred_answers = re.findall(r"A|B|C|D|E", sentence_)
-        if pred_answers:
+    def extract_answer(dataset_name, sentence: str) -> float:
+        dataset = dataset_name
+        if dataset == "boolq":
+            sentence_ = sentence.strip()
+            pred_answers = re.findall(r"true|false", sentence_)
             if not pred_answers:
                 return ""
             return pred_answers[0]
-        else:
-            return ""
+        elif dataset == "piqa":
+            sentence_ = sentence.strip()
+            pred_answers = re.findall(r"solution1|solution2", sentence_)
+            if not pred_answers:
+                return ""
+            return pred_answers[0]
+        elif dataset in ["social_i_qa", "ARC-Challenge", "ARC-Easy", "openbookqa"]:
+            sentence_ = sentence.strip()
+            pred_answers = re.findall(r"answer1|answer2|answer3|answer4|answer5", sentence_)
+            if not pred_answers:
+                return ""
+            return pred_answers[0]
+        elif dataset == "hellaswag":
+            sentence_ = sentence.strip()
+            pred_answers = re.findall(r"ending1|ending2|ending3|ending4", sentence_)
+            if not pred_answers:
+                return ""
+            return pred_answers[0]
+        elif dataset == "winogrande":
+            sentence_ = sentence.strip()
+            pred_answers = re.findall(r"option1|option2", sentence_)
+            if not pred_answers:
+                return ""
+            return pred_answers[0]
 
     def load_test_data(test_dataset) -> list:
         """
@@ -440,22 +425,22 @@ def main():
         if input:
             return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
-                            ### Instruction:
-                            {instruction}
+                        ### Instruction:
+                        {instruction}
 
-                            ### Input:
-                            {input}
+                        ### Input:
+                        {input}
 
-                            ### Response:
-                            """
+                        ### Response:
+                        """
         else:
             return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request. 
 
-                            ### Instruction:
-                            {instruction}
+                        ### Instruction:
+                        {instruction}
 
-                            ### Response:
-                            """
+                        ### Response:
+                        """
 
     def evaluate_one_sample(
         instruction,
@@ -465,11 +450,11 @@ def main():
         top_p=0.75,
         top_k=40,
         num_beams=4,
-        max_new_tokens=256,
+        max_new_tokens=32,
         **kwargs,
     ):
-        prompt = generate_prompt_eval(instruction, input)
-        inputs = tokenizer(prompt, return_tensors="pt")
+        prompts = generate_prompt_eval(instruction, input)
+        inputs = tokenizer(prompts, return_tensors="pt")
         input_ids = inputs["input_ids"].to(model.device)
         generation_config = GenerationConfig(
             temperature=temperature,
@@ -494,50 +479,118 @@ def main():
     def evaluate(model, dataset_name, save_file):
         model.eval()
         dataset = load_test_data(dataset_name)
-        total = len(dataset)
 
+        total = len(dataset)
         correct = 0
-        miss = 0.001
         output_data = []
-        for idx, data in tqdm(enumerate(dataset)):
+        for idx, data in enumerate(dataset):
             instruction = data.get("instruction")
-            outputs = evaluate_one_sample(instruction, model=model)
+            output = evaluate_one_sample(instruction, model=model)
             label = data.get("answer")
             flag = False
-            if dataset_name.lower() in ["aqua"]:
-                predict = extract_answer_letter(outputs)
-                if label == predict:
-                    correct += 1
-                    flag = True
-            else:
-                if isinstance(label, str):
-                    label = float(label)
-                predict = extract_answer_number(dataset_name, outputs)
-                if abs(label - predict) <= miss:
-                    correct += 1
-                    flag = True
+            predict = extract_answer(dataset_name, output)
+            if label == predict:
+                correct += 1
+                flag = True
             new_data = copy.deepcopy(data)
-            new_data["output_pred"] = outputs
+            new_data["output_pred"] = output
             new_data["pred"] = predict
             new_data["flag"] = flag
             output_data.append(new_data)
-            logger.info(f"id: {idx + 1}")
-            logger.info(outputs)
-            logger.info(f"prediction: {predict}")
-            logger.info(f"label: {label}")
-            logger.info(f"\rtest:{idx + 1}/{total} | accuracy {correct}  {correct / (idx + 1)}")
+            print(data["instruction"])
+            print(output)
+            print("prediction:", predict)
+            print("label:", label)
+
+            print(f"\rtest:{idx + 1}/{total} | accuracy {correct}  {correct / (idx + 1)}")
+
             with open(save_file, "w+") as f:
                 json.dump(output_data, f, indent=4)
 
         acc = correct / total
         return acc
 
+    def check_lora_sparsity(model):
+        def find_layers(module, layers=[torch.nn.Linear], name=""):
+            """
+            Recursively find the layers of a certain type in a module.
+
+            Args:
+                module (nn.Module): PyTorch module.
+                layers (list): List of layer types to find.
+                name (str): Name of the module.
+
+            Returns:
+                dict: Dictionary of layers of the given type(s) within the module.
+            """
+            if type(module) in layers:
+                return {name: module}
+            res = {}
+            for name1, child in module.named_children():
+                res.update(find_layers(child, layers=layers, name=name + "." + name1 if name != "" else name1))
+            return res
+
+        layers = model.base_model.model.model.layers  # llama
+        count = 0
+        total_params = 0
+        for i in range(len(layers)):
+            layer = layers[i]
+            subset = find_layers(layer)
+
+            sub_count = 0
+            sub_params = 0
+            for name in subset:
+                W = subset[name].weight.data
+                count += (W == 0).sum().item()
+                total_params += W.numel()
+
+                sub_count += (W == 0).sum().item()
+                sub_params += W.numel()
+
+            print(f"layer {i} sparsity {float(sub_count) / sub_params:.6f}")
+
+        return float(count) / total_params
+
+    def check_shears_sparsity(model):
+        def find_layers(module, layers=[NNCFLinear], name=""):
+            if type(module) in layers or type(module).__name__ == "NNCFUserSelfLinear":
+                return {name: module}
+            res = {}
+            for name1, child in module.named_children():
+                res.update(find_layers(child, layers=layers, name=name + "." + name1 if name != "" else name1))
+            return res
+
+        layers = model.base_model.model.model.layers  # llama
+
+        count = 0
+        total_params = 0
+        for i in range(len(layers)):
+            layer = layers[i]
+            subset = find_layers(layer)
+
+            for name in subset:
+                W = subset[name].weight.data
+                total_params += W.numel()
+                pruned_output_width, pruned_input_width = W.shape
+                for id, ops in subset[name].pre_ops.items():
+                    if type(ops) == UpdateWeight:
+                        pruned_input_width = ops.op.get_active_width()
+                    elif type(ops) == UpdateWeightAndOptionalBias:
+                        pruned_output_width = ops.op.get_active_width()
+                pruned_W = W[:pruned_output_width, :pruned_input_width]
+                count += (pruned_W != 0).sum().item()
+
+        sparsity = 1 - float(count) / total_params
+        return sparsity
+
     def test_subnetwork(subnetwork, name):
         logger.info(f"*** Evaluation - {name} ***")
+        sparsity = check_shears_sparsity(subnetwork)
         non_zero_params = sum([(param.data != 0).sum().item() for _, param in subnetwork.named_parameters()])
         macs, weights = trainer.compression_ctrl.multi_elasticity_handler.count_flops_and_weights_for_active_subnet()
         metrics = {
             f"{name}_non_zero_params": non_zero_params,
+            f"{name}_sparsity": sparsity,
             f"{name}_macs": str(macs / 2000000),
             f"{name}_weights": str(weights),
         }
@@ -557,7 +610,6 @@ def main():
         trainer.save_metrics("eval", metrics)
         trainer.log_metrics("eval", metrics)
 
-    # test accuracy (heuristic)
     if training_args.do_test and training_args.local_rank <= 0:
         if compression_ctrl is not None:
             trainer.compression_ctrl.multi_elasticity_handler.enable_all()
@@ -568,19 +620,20 @@ def main():
             }
             heuristic_config = {ElasticityDim.WIDTH: heuristic_config}
             trainer.compression_ctrl.multi_elasticity_handler.activate_subnet_for_config(heuristic_config)
-            test_subnetwork(trainer.model, "heuristic")
+            test_subnetwork(trainer.model, "Heuristic")
         else:
-            # LoRA
             all_results = []
             for test_dataset in TEST_DATASETS:
                 logger.info(f"*** Evaluation on {test_dataset} ***")
                 save_file = os.path.join(training_args.output_dir, f"{test_dataset}.res.json")
+                sparsity = check_lora_sparsity(trainer.model)
                 non_zero_params = sum([(param.data != 0).sum().item() for _, param in trainer.model.named_parameters()])
                 accuracy = evaluate(trainer.model, test_dataset, save_file)
                 all_results.append(accuracy)
                 metrics = {
                     f"{test_dataset}_accuracy": accuracy,
                     "non_zero_params": non_zero_params,
+                    "sparsity": sparsity,
                 }
                 trainer.save_metrics("eval", metrics)
             avg_metrics = {

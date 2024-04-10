@@ -1,84 +1,6 @@
-#######################################
-Unified Math 10k (math_10k.json)
-#######################################
-
-# LLaMA-7B-LoNAS
-CUDA_VISIBLE_DEVICES=${DEVICES} python run_math.py \
-  --dataset_path datasets/math_10k.json \
-  --model_name_or_path yahma/llama-7b-hf \
-  --do_train \
-  --do_test \
-  --per_device_train_batch_size 4 \
-  --gradient_accumulation_steps 4 \
-  --num_train_epochs 7 \
-  --warmup_steps 100 \
-  --optim adamw_torch \
-  --fp16 \
-  --output_dir ./trained_super_adapter/unified_math_10k/llama-7b-lonas/ \
-  --logging_steps 20 \
-  --save_strategy epoch \
-  --save_total_limit 2 \
-  --val_set_size 0 \
-  --lora \
-  --lora_r 32 \
-  --lora_alpha 64 \
-  --lora_dropout 0.1 \
-  --target_modules q_proj,k_proj,v_proj,up_proj,gate_proj,down_proj \
-  --nncf_config nncf_config/unified_math_10k/nncf_lonas_llama_7b.json
-
-# LLaMA-13B-LoNAS
-CUDA_VISIBLE_DEVICES=${DEVICES} python run_math.py \
-  --dataset_path datasets/math_10k.json \
-  --model_name_or_path yahma/llama-13b-hf \
-  --do_train \
-  --do_test \
-  --per_device_train_batch_size 4 \
-  --gradient_accumulation_steps 4 \
-  --num_train_epochs 6 \
-  --warmup_steps 100 \
-  --optim adamw_torch \
-  --fp16 \
-  --output_dir ./trained_super_adapter/unified_math_10k/llama-13b-lonas/ \
-  --logging_steps 20 \
-  --save_strategy epoch \
-  --save_total_limit 2 \
-  --val_set_size 0 \
-  --lora \
-  --lora_r 32 \
-  --lora_alpha 64 \
-  --lora_dropout 0.1 \
-  --target_modules q_proj,k_proj,v_proj,up_proj,down_proj \
-  --nncf_config nncf_config/unified_math_10k/nncf_lonas_llama_13b.json
-
-# BLOOMz-7B-LoNAS
-CUDA_VISIBLE_DEVICES=${DEVICES} python run_math.py \
-  --dataset_path datasets/math_10k.json \
-  --model_name_or_path bigscience/bloomz-7b1 \
-  --do_train \
-  --do_test \
-  --per_device_train_batch_size 4 \
-  --gradient_accumulation_steps 4 \
-  --num_train_epochs 8 \
-  --warmup_steps 100 \
-  --optim adamw_torch \
-  --fp16 \
-  --output_dir ./trained_super_adapter/unified_math_10k/bloomz-7b-lonas/ \
-  --logging_steps 20 \
-  --evaluation_strategy epoch \
-  --save_strategy epoch \
-  --save_total_limit 2 \
-  --val_set_size 0 \
-  --lora \
-  --lora_r 32 \
-  --lora_alpha 64 \
-  --lora_dropout 0.1 \
-  --target_modules query_key_value,dense_h_to_4h,dense_4h_to_h \
-  --nncf_config nncf_config/unified_math_10k/nncf_lonas_bloomz_7b.json
-
-
-##############################################
-Unified Commonsense 15k (commonsense_15k.json)
-##############################################
+###########################################
+Unified Commonsense (commonsense_15k.json)
+###########################################
 
 # LLaMA-7B-LoNAS
 CUDA_VISIBLE_DEVICES=${DEVICES} python run_commonsense.py \
@@ -92,7 +14,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_commonsense.py \
   --warmup_steps 100 \
   --optim adamw_torch \
   --fp16 \
-  --output_dir ./trained_super_adapter/unified_commonsense/llama-7b-lonas/ \
+  --output_dir ./trained_super_adapter/unified_commonsense/lonas-llama-7b-commonsense \
   --logging_steps 20 \
   --save_strategy epoch \
   --save_total_limit 2 \
@@ -103,3 +25,255 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_commonsense.py \
   --lora_dropout 0.1 \
   --target_modules q_proj,k_proj,v_proj,up_proj,gate_proj,down_proj \
   --nncf_config nncf_config/unified_commonsense/nncf_lonas_llama_7b.json
+
+
+#############################
+Unified Math (math_10k.json)
+#############################
+
+# BLOOMz-7B-LoNAS
+CUDA_VISIBLE_DEVICES=${DEVICES} python run_math.py \
+  --dataset_path datasets/math_10k.json \
+  --model_name_or_path bigscience/bloomz-7b1 \
+  --do_train \
+  --do_test \
+  --per_device_train_batch_size 4 \
+  --gradient_accumulation_steps 4 \
+  --num_train_epochs 8 \
+  --warmup_steps 100 \
+  --optim adamw_torch \
+  --fp16 \
+  --output_dir ./trained_super_adapter/unified_math/lonas-bloomz-7b-math/ \
+  --logging_steps 20 \
+  --evaluation_strategy epoch \
+  --save_strategy epoch \
+  --save_total_limit 2 \
+  --val_set_size 0 \
+  --lora \
+  --lora_r 32 \
+  --lora_alpha 64 \
+  --lora_dropout 0.1 \
+  --target_modules query_key_value,dense_h_to_4h,dense_4h_to_h \
+  --nncf_config nncf_config/unified_math/nncf_lonas_bloomz_7b.json
+
+
+#######################################
+GLUE benchmark
+#######################################
+
+# task: rte
+
+CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
+  --task_name rte
+  --model_name_or_path bert-base-uncased \
+  --do_train \
+  --do_eval \
+  --do_search \
+  --per_device_train_batch_size 32 \
+  --per_device_eval_batch_size 64 \
+  --num_train_epochs 80 \
+  --max_seq_length 128 \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-rte/ \
+  --logging_steps 20 \
+  --evaluation_strategy epoch \
+  --save_strategy epoch \
+  --save_total_limit 2 \
+  --lora \
+  --lora_r 8 \
+  --lora_alpha 16 \
+  --lora_dropout 0.1 \
+  --warmup_ratio 0.06 \
+  --seed 0 \
+  --weight_decay 0.1 \
+  --target_modules query,value \
+  --nncf_config nncf_config/glue/nncf_lonas_bert_base_rte.json
+
+
+# task: mrpc
+
+CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
+  --task_name mrpc
+  --model_name_or_path bert-base-uncased \
+  --do_train \
+  --do_eval \
+  --do_search \
+  --per_device_train_batch_size 32 \
+  --per_device_eval_batch_size 64 \
+  --num_train_epochs 35 \
+  --max_seq_length 128 \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-mrpc/ \
+  --logging_steps 20 \
+  --evaluation_strategy epoch \
+  --save_strategy epoch \
+  --save_total_limit 2 \
+  --lora \
+  --lora_r 8 \
+  --lora_alpha 16 \
+  --lora_dropout 0.1 \
+  --warmup_ratio 0.06 \
+  --seed 0 \
+  --weight_decay 0.1 \
+  --target_modules query,value \
+  --nncf_config nncf_config/glue/nncf_lonas_bert_base_mrpc.json
+
+# task: stsb
+
+CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
+  --task_name stsb
+  --model_name_or_path bert-base-uncased \
+  --do_train \
+  --do_eval \
+  --do_search \
+  --per_device_train_batch_size 64 \
+  --per_device_eval_batch_size 64 \
+  --num_train_epochs 60 \
+  --max_seq_length 128 \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-stsb/ \
+  --logging_steps 20 \
+  --evaluation_strategy epoch \
+  --save_strategy epoch \
+  --save_total_limit 2 \
+  --lora \
+  --lora_r 8 \
+  --lora_alpha 16 \
+  --lora_dropout 0.1 \
+  --warmup_ratio 0.06 \
+  --seed 0 \
+  --weight_decay 0.1 \
+  --target_modules query,value \
+  --nncf_config nncf_config/glue/nncf_lonas_bert_base_stsb.json
+
+# task: cola
+
+CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
+  --task_name cola
+  --model_name_or_path bert-base-uncased \
+  --do_train \
+  --do_eval \
+  --do_search \
+  --per_device_train_batch_size 64 \
+  --per_device_eval_batch_size 64 \
+  --num_train_epochs 80 \
+  --max_seq_length 128 \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-cola/ \
+  --logging_steps 20 \
+  --evaluation_strategy epoch \
+  --save_strategy epoch \
+  --save_total_limit 2 \
+  --lora \
+  --lora_r 8 \
+  --lora_alpha 16 \
+  --lora_dropout 0.05 \
+  --warmup_ratio 0.06 \
+  --seed 0 \
+  --weight_decay 0.1 \
+  --target_modules query,value \
+  --nncf_config nncf_config/glue/nncf_lonas_bert_base_cola.json
+
+# task: sst2
+
+CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
+  --task_name sst2
+  --model_name_or_path bert-base-uncased \
+  --do_train \
+  --do_eval \
+  --do_search \
+  --per_device_train_batch_size 64 \
+  --per_device_eval_batch_size 64 \
+  --num_train_epochs 60 \
+  --max_seq_length 128 \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-sst2/ \
+  --logging_steps 20 \
+  --evaluation_strategy epoch \
+  --save_strategy epoch \
+  --save_total_limit 2 \
+  --lora \
+  --lora_r 8 \
+  --lora_alpha 16 \
+  --lora_dropout 0.1 \
+  --warmup_ratio 0.06 \
+  --seed 0 \
+  --weight_decay 0.1 \
+  --target_modules query,value \
+  --nncf_config nncf_config/glue/nncf_lonas_bert_base_sst2.json
+
+# task: qnli
+
+CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
+  --task_name qnli
+  --model_name_or_path bert-base-uncased \
+  --do_train \
+  --do_eval \
+  --do_search \
+  --per_device_train_batch_size 64 \
+  --per_device_eval_batch_size 64 \
+  --num_train_epochs 80 \
+  --max_seq_length 256 \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-qnli/ \
+  --logging_steps 20 \
+  --evaluation_strategy epoch \
+  --save_strategy epoch \
+  --save_total_limit 2 \
+  --lora \
+  --lora_r 8 \
+  --lora_alpha 16 \
+  --lora_dropout 0.1 \
+  --warmup_ratio 0.06 \
+  --seed 0 \
+  --weight_decay 0.1 \
+  --target_modules query,value \
+  --nncf_config nncf_config/glue/nncf_lonas_bert_base_qnli.json
+
+# task: qqp
+
+CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
+  --task_name qqp
+  --model_name_or_path bert-base-uncased \
+  --do_train \
+  --do_eval \
+  --do_search \
+  --per_device_train_batch_size 64 \
+  --per_device_eval_batch_size 64 \
+  --num_train_epochs 60 \
+  --max_seq_length 128 \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-qqp/ \
+  --logging_steps 20 \
+  --evaluation_strategy epoch \
+  --save_strategy epoch \
+  --save_total_limit 2 \
+  --lora \
+  --lora_r 8 \
+  --lora_alpha 16 \
+  --lora_dropout 0.1 \
+  --warmup_ratio 0.06 \
+  --seed 0 \
+  --weight_decay 0.1 \
+  --target_modules query,value \
+  --nncf_config nncf_config/glue/nncf_lonas_bert_base_qqp.json
+
+# task: mnli
+
+CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
+  --task_name mnli
+  --model_name_or_path bert-base-uncased \
+  --do_train \
+  --do_eval \
+  --do_search \
+  --per_device_train_batch_size 64 \
+  --per_device_eval_batch_size 64 \
+  --num_train_epochs 40 \
+  --max_seq_length 128 \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-mnli/ \
+  --logging_steps 20 \
+  --evaluation_strategy epoch \
+  --save_strategy epoch \
+  --save_total_limit 2 \
+  --lora \
+  --lora_r 8 \
+  --lora_alpha 16 \
+  --lora_dropout 0.1 \
+  --warmup_ratio 0.06 \
+  --seed 0 \
+  --weight_decay 0.1 \
+  --target_modules query,value \
+  --nncf_config nncf_config/glue/nncf_lonas_bert_base_mnli.json

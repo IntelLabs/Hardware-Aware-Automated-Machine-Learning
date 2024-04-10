@@ -6,7 +6,7 @@
 <img src="architecture.png" alt="BootstrapNAS Architecture" width="500"/>
 </p>
 
-BootstrapNAS (1) takes as input a pre-trained model. (2) It uses this model to generate a weight-sharing super-network. (3) BootstrapNAS then applies a training strategy, and once the super-network has been trained, (4) it searches for efficient subnetworks that satisfy the user's requirements. (5) The configuration of the discovered sub-network(s) is returned to the user.
+BootstrapNAS (1) takes a pre-trained model as input. (2) It uses this model to generate a weight-sharing super-network. (3) BootstrapNAS then applies a training strategy, and once the super-network has been trained, (4) it searches for efficient subnetworks that satisfy the user's requirements. (5) The configuration of the discovered sub-network(s) is returned to the user.
 
 ## Quickstart 
 
@@ -22,7 +22,7 @@ More information about BootstrapNAS is available in our papers:
   @inproceedings{
     munoz2022automated,
     title={Automated Super-Network Generation for Scalable Neural Architecture Search},
-    author={Mu{\~{n}}oz, J. Pablo and Lyalyushkin, Nikolay and Lacewell, Chaunte and Senina, Anastasia and Cummings, Daniel and Sarah, Anthony  and Kozlov, Alexander and Jain, Nilesh},
+    author={Muñoz, J. Pablo and Lyalyushkin, Nikolay and Lacewell, Chaunte and Senina, Anastasia and Cummings, Daniel and Sarah, Anthony  and Kozlov, Alexander and Jain, Nilesh},
     booktitle={First Conference on Automated Machine Learning (Main Track)},
     year={2022},
     url={https://openreview.net/forum?id=HK-zmbTB8gq}
@@ -33,7 +33,7 @@ More information about BootstrapNAS is available in our papers:
 ```BibTex
 @article{
   bootstrapNAS,
-  author    = {Mu{\~{n}}oz, J. Pablo  and Lyalyushkin, Nikolay  and Akhauri, Yash and Senina, Anastasia and Kozlov, Alexander  and Jain, Nilesh},
+  author    = {Muñoz, J. Pablo  and Lyalyushkin, Nikolay  and Akhauri, Yash and Senina, Anastasia and Kozlov, Alexander  and Jain, Nilesh},
   title     = {Enabling NAS with Automated Super-Network Generation},
   journal   = {CoRR},
   volume    = {abs/2112.10878},

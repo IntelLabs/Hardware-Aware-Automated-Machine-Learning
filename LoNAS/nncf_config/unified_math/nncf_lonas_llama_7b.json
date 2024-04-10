@@ -21,7 +21,7 @@
             },
             "schedule": {
                 "list_stage_descriptions": [
-                    {"train_dims": ["width"], "epochs": 6, "depth_indicator": 1, "width_indicator": 5, "init_lr": 3e-4, "epochs_lr": 6, "sample_rate": 1}
+                    {"train_dims": ["width"], "epochs": 7, "depth_indicator": 1, "width_indicator": 5, "init_lr": 3e-4, "epochs_lr": 7, "sample_rate": 1}
                 ]
             },
             "elasticity": {
