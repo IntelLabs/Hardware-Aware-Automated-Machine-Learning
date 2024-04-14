@@ -226,7 +226,7 @@ If you find our Shears code and paper helpful, please kindly cite:
 @article{munoz2024shears,
   title = {Shears: Unstructured Sparsity with Neural Low-rank Adapter Search},
   author={J. Pablo Munoz and Jinjie Yuan and Nilesh Jain},
-  journal={},
+  journal={The 2024 Annual Conference of the North American Chapter of the Association for Computational Linguistics (NAACL-2024)},
   year={2024}
 }
 ```
