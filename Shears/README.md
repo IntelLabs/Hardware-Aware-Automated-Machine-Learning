@@ -1,8 +1,8 @@
 # :scissors:Shears: Fine-tuning For Efficient Models
 
-Official implementation of [Shears: Unstructured Sparsity with Neural Low-rank Adapter Search](). :fire:
+Official implementation of [Shears: Unstructured Sparsity with Neural Low-rank Adapter Search](https://arxiv.org/abs/2404.10934). :fire:
 
-This repo contains the code for **Shears**, a practical and novel solution that generates efficient models fine-tuned for downstream-specific tasks for real-world applications. Please refer to our [paper]() for more details.
+This repo contains the code for **Shears**, a practical and novel solution that generates efficient models fine-tuned for downstream-specific tasks for real-world applications. Please refer to our [paper](https://arxiv.org/abs/2404.10934) for more details.
 
 ## News
 - **[2024.03.07]**  Release training and inference code for **Shears V1**. :tada:
