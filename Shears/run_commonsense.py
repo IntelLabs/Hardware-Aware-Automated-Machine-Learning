@@ -27,7 +27,6 @@ from transformers import set_seed
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version
 
-from nncf import NNCFConfig
 from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import ElasticityDim
 from nncf.experimental.torch.nas.bootstrapNAS.training.model_creator_helpers import (
     create_compressed_model_from_algo_names,
@@ -36,6 +35,8 @@ from nncf.torch.layers import NNCFLinear
 from nncf.torch.model_creation import create_nncf_network
 from nncf.torch.module_operations import UpdateWeight
 from nncf.torch.module_operations import UpdateWeightAndOptionalBias
+
+from utils.utils import load_nncf_config
 
 check_min_version("4.31.0")
 logger = logging.getLogger(__name__)
@@ -250,7 +251,12 @@ def main():
 
     nncf_config = None
     if training_args.nncf_config is not None:
-        nncf_config = NNCFConfig.from_json(training_args.nncf_config)
+        nncf_config = load_nncf_config(
+            training_args.nncf_config,
+            lr=training_args.learning_rate,
+            epochs=training_args.num_train_epochs,
+            num_hidden_layers=model.config.num_hidden_layers
+        )
 
         if nncf_config.get("log_dir") is None:
             nncf_config["log_dir"] = training_args.output_dir

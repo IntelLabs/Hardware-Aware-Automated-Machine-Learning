@@ -2,7 +2,7 @@
 
 This repository contains instructions and examples for efficient neural architecture discovery and optimization solutions developed at Intel Labs. 
 
-### :fire:[Shears: Unstructured Sparsity with Neural Low-rank Adapter Search](./Shears/README.md) 
+### :fire:[Shears: Unstructured Sparsity with Neural Low-rank Adapter Search](./Shears) 
 
 Shears integrates cost-effective
 sparsity and Neural Low-rank adapter
