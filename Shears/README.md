@@ -2,19 +2,22 @@
 
 Official implementation of [Shears: Unstructured Sparsity with Neural Low-rank Adapter Search](https://arxiv.org/abs/2404.10934). :fire:
 
-This repo contains the code for **Shears**, a practical and novel solution that generates efficient models fine-tuned for downstream-specific tasks for real-world applications. Please refer to our [paper](https://arxiv.org/abs/2404.10934) for more details.
+This repo contains the code for **Shears**, a practical and novel solution that generates efficient models fine-tuned for downstream-specific tasks for real-world applications. Please refer to our paper for more details.
 
 ## News
-- **[2024.03.07]**  Release training and inference code for **Shears V1**. :tada:
+- **[2024.04.18]**  **Shears V1** paper has been released ([link](https://arxiv.org/abs/2404.10934)) and **accepted by NAACL 2024 (Industry Track)**. :books:
+- **[2024.04.11]**  Release training and inference code for **Shears V1**. :tada:
 
 ## Released Models 🤗
 
-| Name                                                                                                                 | Super-network                                                                                                                                                                                  | Sparsity                                               | Train Data                                                         | Base Model
-|----------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------| ------------------------------------------------------ | ------------------------------------------------------------ | ------- | 
-| [shears-llama-7b-50-math-heuristic](https://huggingface.co/IntelLabs/shears-llama-7b-50-math-heuristic) | [shears-llama-7b-50-math-super](https://huggingface.co/IntelLabs/shears-llama-7b-50-math-super) ([NNCF Config](./nncf_config/unified_math/nncf_shears_llama_7b_sparsity50.json))               | 50%           | [Unified Math](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)         | [yahma/llama-7b-hf](https://huggingface.co/yahma/llama-7b-hf)
-| [shears-llama-7b-50-commonsense-heuristic](https://huggingface.co/IntelLabs/shears-llama-7b-50-commonsense-heuristic) | [shears-llama-7b-50-commonsense-super](https://huggingface.co/IntelLabs/shears-llama-7b-50-commonsense-super) ([NNCF Config](./nncf_config/unified_commonsense/nncf_shears_llama_7b_sparsity50.json)) | 50%                                                                               | [Unified Commonsense](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/commonsense_170k.json) | [yahma/llama-7b-hf](https://huggingface.co/yahma/llama-7b-hf)
-| [shears-llama-13b-50-math-heuristic](https://huggingface.co/IntelLabs/shears-llama-13b-50-math-heuristic) | [shears-llama-13b-50-math-super](https://huggingface.co/IntelLabs/shears-llama-13b-50-math-super)  ([NNCF Config](./nncf_config/unified_math/nncf_shears_llama_13b_sparsity50.json))           | 50%                                                                                      | [Unified Math](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)      |  [yahma/llama-13b-hf](https://huggingface.co/yahma/llama-13b-hf)
-| [shears-mpt-7b-50-gsm8k-heuristic](https://huggingface.co/IntelLabs/shears-mpt-7b-50-gsm8k-heuristic) | [shears-mpt-7b-50-gsm8k-super](https://huggingface.co/IntelLabs/shears-mpt-7b-50-gsm8k-super)      ([NNCF Config](./nncf_config/gsm8k/nncf_shears_mpt_7b_sparsity50.json))            | 50%                                                                                      | [GSM8K](https://huggingface.co/datasets/gsm8k)              | [mosaicml/mpt-7b](https://huggingface.co/mosaicml/mpt-7b)
+We have released several models fine-tuned with Shears. Find them in the table below:
+
+| Name                                                                                                                  | Super-network                                                                                                 | Sparsity | Train Data                                                                                                               | Base Model
+|-----------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|----------|--------------------------------------------------------------------------------------------------------------------------| ------- | 
+| [shears-llama-7b-50-math-heuristic](https://huggingface.co/IntelLabs/shears-llama-7b-50-math-heuristic)               | [shears-llama-7b-50-math-super](https://huggingface.co/IntelLabs/shears-llama-7b-50-math-super)               | 50%      | [Unified Math](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)                  | [IntelLabs/Llama-1-7B-sparsity50](https://huggingface.co/IntelLabs/Llama-1-7B-sparsity50)
+| [shears-llama-7b-50-commonsense-heuristic](https://huggingface.co/IntelLabs/shears-llama-7b-50-commonsense-heuristic) | [shears-llama-7b-50-commonsense-super](https://huggingface.co/IntelLabs/shears-llama-7b-50-commonsense-super) | 50%      | [Unified Commonsense](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/commonsense_170k.json)   | [IntelLabs/Llama-1-7B-sparsity50](https://huggingface.co/IntelLabs/Llama-1-7B-sparsity50)
+| [shears-llama-13b-50-math-heuristic](https://huggingface.co/IntelLabs/shears-llama-13b-50-math-heuristic)             | [shears-llama-13b-50-math-super](https://huggingface.co/IntelLabs/shears-llama-13b-50-math-super)             | 50%      | [Unified Math](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)                  |  [IntelLabs/Llama-1-13B-sparsity50](https://huggingface.co/IntelLabs/Llama-1-13B-sparsity50)
+| [shears-mpt-7b-50-gsm8k-heuristic](https://huggingface.co/IntelLabs/shears-mpt-7b-50-gsm8k-heuristic)                 | [shears-mpt-7b-50-gsm8k-super](https://huggingface.co/IntelLabs/shears-mpt-7b-50-gsm8k-super)                 | 50%      | [GSM8K](https://huggingface.co/datasets/gsm8k)                                                                           | [IntelLabs/MPT-7B-sparsity50](https://huggingface.co/IntelLabs/MPT-7B-sparsity50)
 
 ## Overview
 
@@ -34,8 +37,8 @@ Overall, Shears has a well-designed, simple yet effective, powerful, and general
 Here is an installation script developed from scratch for **Shears**.
 
 ```
-conda create -n shears -y python=3.10
-conda activate shears
+conda create -n shearsv1 -y python=3.10
+conda activate shearsv1
 
 # install pytorch
 pip install torch==2.1.2
@@ -49,24 +52,22 @@ Note: Please ignore the whitespace issues when applying the patch and running `i
 
 ### Inference
 
-Please clone/download our released models from [HuggingFace](https://huggingface.co/IntelLabs) - checkout [Table](#released-models-) for model information, e.g.,
-```bash
-git lfs install
-git clone https://huggingface.co/IntelLabs/shears-llama-7b-50-math-heuristic
-```
-Each Shears model contains the pretrained weights of the sparsified language model (`base_model/`) and the weights of the fine-tuned adapters (`adapter_model/`).
-Denote the path to the downloaded model as `SHEARS_PATH`. The following code shows how to load the Shears model: 
+The following code shows an example of loading our trained Shears model: 
 ```python
 from transformers import AutoModelForCausalLM
 from peft import PeftModel
 
-base_model_path, adapter_model_path = f"{SHEARS_PATH}/base_model", f"{SHEARS_PATH}/adapter_model"
-base_model = AutoModelForCausalLM.from_pretrained(base_model_path)
-model = PeftModel.from_pretrained(base_model, adapter_model_path)
+base_model = AutoModelForCausalLM.from_pretrained("IntelLabs/Llama-1-7B-sparsity50")
+model = PeftModel.from_pretrained(base_model, "IntelLabs/shears-llama-7b-50-math-heuristic")
 ```
 Below is an example of generating the instruction-following responses for some math reasoning samples:
 ```bash
-CUDA_VISIBLE_DEVICES=$DEVICES python example_math.py --model_path $SHEARS_PATH
+python example_math.py --base_model_path IntelLabs/Llama-1-7B-sparsity50 --adapter_model_path IntelLabs/shears-llama-7b-50-math-heuristic
+```
+
+For some commonsense reasoning samples:
+```bash
+python example_commonsense.py --base_model_path IntelLabs/Llama-1-7B-sparsity50 --adapter_model_path IntelLabs/shears-llama-7b-50-commonsense-heuristic
 ```
 
 ### Training
@@ -77,43 +78,53 @@ Before fine-tuning, Shears employs a simple but effective pruning approach [Wand
 Clone the [Wanda](https://github.com/locuslab/wanda) repo:
 
 ```bash
-git clone https://github.com/locuslab/wanda.git && pushd wanda && git checkout 8e8fc87 && popd
+git clone https://github.com/locuslab/wanda.git && cd wanda && git checkout 8e8fc87 && cd ..
 ```
 
-Below is an example command for unstructured sparsifying LLaMA-7b with Wanda, to achieve unstructured 50% sparsity (takes about five minutes).
+Below is an example command for unstructured sparsifying LLaMA-7B with Wanda, to achieve unstructured 50% sparsity (takes about five minutes).
 ```bash
-CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main.py \
+SPARSE_MODEL_PATH=unstructured_sparsity_models/Llama-1-7B-sparsity50
+
+python wanda/main.py \
     --model yahma/llama-7b-hf \
     --prune_method wanda \
     --sparsity_ratio 0.5 \
     --sparsity_type unstructured \
     --save wanda_out \
-    --save_model unstructured_sparsity_models/llama-7b-sparsity50
+    --save_model $SPARSE_MODEL_PATH
 ```
 - `--model`: The identifier for the model on the Hugging Face model hub or local path.
 - `--sparsity_ratio`: Specifies the percentage of weights to be pruned.
 - `--save_model`: Specifies the directory where the pruned language model will be stored.
 
-Further details can be referred to [Wanda](https://github.com/locuslab/wanda).
+Further details can be referred to [Wanda](https://github.com/locuslab/wanda). You can also skip this step and adopt our released sparsified models 
+(find them in Base Model of [Table](#released-models-)). 
+It is worth noting that the sparsifying step can be replaced by any other sparse 
+(or even quantization) algorithm. Feel free to try other approaches for the base model.
+
 
 #### Step 2. Adapter Training
 
-Taking the unified math reasoning training as an example, please download the 10K instruction-following [math reasoning training data](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json) from [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters), and place it under `DATA_PATH`. 
+Taking the unified math reasoning training as an example, please download the 10K instruction-following math reasoning training data ([link](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)) from [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters), and place it under `DATA_PATH`. 
 
 Example command to train the super-adapter of the pruned LLaMA-7B using Shears:
 
 ```bash
-CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
+ADAPTER_MODEL_PATH=trained_super_adapter/unified_math/shears-llama-7b-50-math-super
+NNCF_CONFIG=nncf_config/nncf_shears_llama.json
+
+python run_math.py \
     --dataset_path $DATA_PATH/math_10k.json \
-    --model_name_or_path unstructured_sparsity_models/llama-7b-sparsity50 \
+    --model_name_or_path $SPARSE_MODEL_PATH \
     --do_train \
-    --per_device_train_batch_size 4 \
-    --gradient_accumulation_steps 4 \
+    --per_device_train_batch_size 8 \
+    --gradient_accumulation_steps 2 \
     --num_train_epochs 3 \
+    --learning_rate 3e-4 \
     --warmup_steps 100 \
     --optim adamw_torch \
     --fp16 \
-    --output_dir trained_super_adapter/unified_math/llama-7b-sparsity50-shears-math-adapter \
+    --output_dir $ADAPTER_MODEL_PATH \
     --logging_steps 20 \
     --save_strategy epoch \
     --save_total_limit 2 \
@@ -122,14 +133,13 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
     --lora_alpha 64 \
     --lora_dropout 0.1 \
     --target_modules q_proj,k_proj,v_proj,up_proj,down_proj \
-    --nncf_config nncf_config/unified_math/nncf_shears_llama_7b_sparsity50.json
+    --nncf_config $NNCF_CONFIG
 ```
 
-`nncf_config` indicates the NNCF configuration including the search space for elastic adapters.
-To implement the elastic adapter, we apply the BootstrapNAS feature supported in [OpenVINO™ NNCF](https://github.com/openvinotoolkit/nncf), which provides a suite of compression algorithms for neural network optimization.
-Note that we use the stage LR scheduler in NNCF, so the learning rate is set in the NNCF config file instead of the `learning_rate` of `TrainingArguments`.
-
-After training, the weights of the trained super-adapter will be saved in `--output_dir` directory.
+`--nncf_config` indicates the NNCF configuration including the search space for elastic adapters.
+To implement the elastic adapter, we apply the [BootstrapNAS](https://github.com/openvinotoolkit/nncf/tree/develop/nncf/experimental/torch/nas/bootstrapNAS) feature supported in [OpenVINO™ NNCF](https://github.com/openvinotoolkit/nncf), which provides a suite of compression algorithms for neural network optimization.
+The NNCF configuration details can be found in [nncf_config.md](./nncf_config/nncf_config.md).
+After training, the trained super-adapter will be saved in `ADAPTER_MODEL_PATH`.
 
 ### Evaluation
 
@@ -143,23 +153,30 @@ mv LLM-Adapters/dataset/ datasets/
 Example command to evaluate the trained super-adapter (heuristic subnetwork):
 
 ```bash
-CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
-    --dataset_path None \
-    --model_name_or_path unstructured_sparsity_models/llama-7b-sparsity50 \
+python run_math.py \
+    --model_name_or_path $SPARSE_MODEL_PATH \
     --lora \
-    --lora_weights trained_super_adapter/unified_math/llama-7b-sparsity50-shears-math-adapter \
+    --lora_weights $ADAPTER_MODEL_PATH \
     --do_test \
-    --output_dir trained_super_adapter/unified_math/llama-7b-sparsity50-shears-math-adapter/results \
-    --nncf_config nncf_config/unified_math/nncf_shears_llama_7b_sparsity50.json
+    --output_dir $ADAPTER_MODEL_PATH/results \
+    --nncf_config $NNCF_CONFIG
 ```
 
-Note that we can use the above command to test our released super-networks for result reproduction in the paper. 
-Pass `${SHEARS_PATH}/base_model` to `--model_name_or_path`, `${SHEARS_PATH}/adapter_model` to `--lora_weights`, and the corresponding NNCF config to `--nncf_config` (see [Table](#released-models-)).
-Note that the torch version we used in our experiments is `1.12.1+cu113`.
+The above command can also be used to test the released model, for example,
+```bash
+python run_math.py \
+    --model_name_or_path IntelLabs/Llama-1-7B-sparsity50 \
+    --lora \
+    --lora_weights IntelLabs/shears-llama-7b-50-math-super \
+    --do_test \
+    --output_dir ./results \
+    --nncf_config nncf_config/nncf_shears_llama.json
+```
+Note that the torch version we used in our experiments is `1.12.1+cu113`, and the results might vary with different versions.
 
-## Reproduce Results
+## Reproduce results
 
-Please refer to `running_commands` for all commands related to reproducing the paper's results.
+Please refer to [running_commands](./running_commands) for all commands related to reproducing the paper's results.
 
 - LLaMA with Math Reasoning tasks
 
@@ -172,29 +189,30 @@ Please refer to `running_commands` for all commands related to reproducing the p
 | **LLaMA-13B-Shears**  | **40%**     | 48.3  | 21.3  | 83.2  | 55.2  | 52.0    |
 | **LLaMA-13B-Shears**  | **50%**     | 45.1  | 22.0  | 83.2  | 53.3  | 50.9    |
 
+- LLaMA with Commonsense Reasoning tasks
+
+| Model                | Sparsity | BoolQ    | PIQA  | SIQA  | HellaSwag | WinoG  | ARC-e   | ARC-c   | OBQA   | Average |
+|----------------------|----------|----------|-------|-------|-----------|--------|---------|---------|--------|---------|
+| ChatGPT              | -        | 73.1     | 85.4  | 68.5  | 78.5      | 66.1   | 89.8    | 79.9    | 74.8   | 77.0    |
+| LLaMA-7B-LoRA        | -        | 68.9     | 80.7  | 77.4  | 78.1      | 78.8   | 77.8    | 61.3    | 74.8   | 74.7    |
+| **LLaMA-7B-Shears**	 | **40%**  | 67.0     | 79.9  | 76.7  | 80.1      | 78.6   | 76.9    | 62.3    | 77.8   | 74.9    |
+| **LLaMA-7B-Shears**	 | **50%**  | 67.3     | 79.1  | 77.5  | 73.3      | 77.7   | 74.4    | 57.9    | 72.8   | 72.5    |
+
 - MPT with GSM8K
 
 | Sparsity | 0%    | 40%  | 50%  | 60%  | 70%  |
 |----------|-------|------|------|------|------|
 | Accuracy | 36.1  | 35.7 | 33.4 | 30.4 | 22.8 |
 
-- LLaMA with Commonsense Reasoning tasks
 
-| Model                | Sparsity  | BoolQ   | PIQA   | SIQA   | HellaSwag  | WinoG  | ARC-e  | ARC-c   | OBQA   | Average  |
-|----------------------|-----------|---------|--------|--------|------------|--------|--------|---------|--------|----------|
-| ChatGPT              | -         | 73.1    | 85.4   | 68.5   | 78.5       | 66.1   | 89.8   | 79.9    | 74.8   | 77.0     |
-| LLaMA-7B-LoRA	       | -         | 68.9    | 80.7   | 77.4   | 78.1       | 78.8   | 77.8   | 61.3    | 74.8   | 74.7     |
-| **LLaMA-7B-Shears**	 | **40%**   | 67.0    | 79.9   | 76.7   | 80.1       | 78.6   | 76.9   | 62.3    | 77.8   | 74.9     |
-| **LLaMA-7B-Shears**	 | **50%**   | 67.3    | 79.1   | 77.5   | 73.3       | 77.7   | 74.4   | 57.9    | 72.8   | 72.5     |
-
-## Explore a trained super-network
+## Explore a trained super-adapter
 
 To enhance exploration of the super-network trained using the Shears method, we provide an illustrative example `search/load_and_explore_supernet.ipynb`. This notebook demonstrates the direct loading of a Shears super-network and the extraction of various subnetworks from it. 
 This facilitates users in applying their own search algorithms and evaluation metrics to extract subnetworks tailored to their specific requirements.
 
-## Extract and save a subnetwork
+## Extract and save a sub-adapter
 
-After training, we obtain the weights of the super-adapter stored in `--output_dir` and activate different 
+After training, we obtain the weights of the super-adapter stored in `ADAPTER_MODEL_PATH` and activate different 
 sub-networks using NNCF. However, once a particular sub-network we need is identified, it's no longer necessary to 
 activate just that one sub-network using NNCF. Instead, what we need is a clean, pruned, and directly-loadable 
 sub-network. For this purpose, we provide a function to extract/save any sub-adapter (please refer to the end of 
@@ -204,21 +222,20 @@ super-adapter:
 ```python
 import os
 from peft import PeftModel
-from search.supernet import ShearsSuperNet
 from transformers import AutoModelForCausalLM
-from nncf import NNCFConfig
+from search.supernet import ShearsSuperNet
+from utils.utils import load_nncf_config
 
-base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL_PATH,trust_remote_code=True)
+base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL_PATH, trust_remote_code=True)
 model = PeftModel.from_pretrained(base_model, ADAPTER_MODEL_PATH)
-nncf_config = NNCFConfig.from_json(NNCF_CONFIG)
+nncf_config = load_nncf_config(NNCF_CONFIG, num_hidden_layers=model.config.num_hidden_layers)
+
 supernet = ShearsSuperNet.from_checkpoint(model, nncf_config, supernet_elasticity_path=None, supernet_weights_path=None)
 supernet.activate_heuristic_subnet()
 supernet.extract_and_save_active_sub_adapter(super_adapter_dir=ADAPTER_MODEL_PATH, sub_adapter_dir=os.path.join(ADAPTER_MODEL_PATH, "heuristic_adapter"))
 ```
 
-We also provide a general script for subnet extraction that supports many of our methods, including Shears, 
-see [extract/README.md]() for details. Moreover, we released some examples of heuristic subnetwork. 
-Refer to them in [Table](#released-models-).
+We released some examples of the extracted heuristic sub-adapters. Refer to them in [Table](#released-models-).
 
 ## Citation
 If you find our Shears code and paper helpful, please kindly cite:
@@ -236,7 +253,9 @@ This work benefits from the following repositories:
 
 - LLaMA: [https://github.com/facebookresearch/llama](https://github.com/facebookresearch/llama)
 - MPT: [https://www.mosaicml.com/mpt](https://www.mosaicml.com/mpt)
-- Peft: [https://github.com/huggingface/peft](https://github.com/huggingface/peft)
-- LLM-Adapters: [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters)
+- Transformers: [https://github.com/huggingface/transformers](https://github.com/huggingface/transformers)
+- PEFT: [https://github.com/huggingface/peft](https://github.com/huggingface/peft)
+- LLM-Adapters: [ttps://github.com/AGI-Edgerunners/LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters)
 - NNCF: [https://github.com/openvinotoolkit/nncf](https://github.com/openvinotoolkit/nncf)
 - BootstrapNAS: [https://github.com/IntelLabs/Hardware-Aware-Automated-Machine-Learning/blob/main/BootstrapNAS](https://github.com/IntelLabs/Hardware-Aware-Automated-Machine-Learning/blob/main/BootstrapNAS)
+- Wanda: [https://github.com/locuslab/wanda](https://github.com/locuslab/wanda)

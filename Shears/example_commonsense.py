@@ -19,26 +19,24 @@ def generate_prompt(instruction):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_path", default="llama-7b-sparsity50-shears-commonsense-heuristic", type=str)
+    parser.add_argument("--base_model_path", default="IntelLabs/Llama-1-7B-sparsity50", type=str)
+    parser.add_argument("--adapter_model_path", default="IntelLabs/shears-llama-7b-50-commonsense-heuristic", type=str)
     args = parser.parse_args()
-    model_path = os.path.join(args.model_path, "base_model")
-    lora_weights = os.path.join(args.model_path, "adapter_model")
+    base_model_path = args.base_model_path
+    adapter_model_path = args.adapter_model_path
 
     base_model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        load_in_8bit=False,
+        base_model_path,
         torch_dtype=torch.float16,
         device_map={"": 0},
+        trust_remote_code=True
     )
-    model = PeftModel.from_pretrained(base_model, lora_weights, torch_dtype=torch.float16, device_map={"": 0})
+    model = PeftModel.from_pretrained(base_model, adapter_model_path, torch_dtype=torch.float16, device_map={"": 0})
+    model.eval()
+    tokenizer = AutoTokenizer.from_pretrained(base_model_path)
 
     non_zero_params = sum([(param.data != 0).sum().item() for _, param in model.named_parameters()])
     print(f"Number of all non-zero parameters: {non_zero_params}")
-
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    tokenizer.pad_token_id = 0
-
-    model.eval()
 
     instructions = [
         "Please choose the correct answer to the question: A cactus stem is used to store\n\nAnswer1: fruit "
@@ -52,6 +50,7 @@ def main():
         "kitten's fur?\n\nAnswer1: gray Answer2: warm Answer3: long Answer4: soft\n\nAnswer format: answer1/"
         "answer2/answer3/answer4",
     ]
+
     for idx, instruction in enumerate(instructions):
         print(f"Example {idx}:")
         prompt = generate_prompt(instruction)
