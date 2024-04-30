@@ -8,11 +8,11 @@ CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main.py \
     --sparsity_ratio 0.4 \
     --sparsity_type unstructured \
     --save wanda_out \
-    --save_model unstructured_sparsity_models/llama-7b-sparsity40
+    --save_model unstructured_sparsity_models/shears-llama-7b-40-base
 
 CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
     --dataset_path datasets/math_10k.json \
-    --model_name_or_path unstructured_sparsity_models/llama-7b-sparsity40 \
+    --model_name_or_path unstructured_sparsity_models/shears-llama-7b-40-base \
     --do_train \
     --do_test \
     --per_device_train_batch_size 4 \
@@ -22,7 +22,7 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
     --warmup_steps 100 \
     --optim adamw_torch \
     --fp16 \
-    --output_dir trained_super_adapter/unified_math/llama-7b-sparsity40-shears-math-adapter \
+    --output_dir trained_super_adapter/shears-llama-7b-40-math-super \
     --logging_steps 20 \
     --save_strategy epoch \
     --save_total_limit 2 \
@@ -41,11 +41,11 @@ CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main.py \
     --sparsity_ratio 0.5 \
     --sparsity_type unstructured \
     --save wanda_out \
-    --save_model unstructured_sparsity_models/llama-7b-sparsity50
+    --save_model unstructured_sparsity_models/shears-llama-7b-50-base
 
 CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
     --dataset_path datasets/math_10k.json \
-    --model_name_or_path unstructured_sparsity_models/llama-7b-sparsity50 \
+    --model_name_or_path unstructured_sparsity_models/shears-llama-7b-50-base \
     --do_train \
     --do_test \
     --per_device_train_batch_size 4 \
@@ -55,7 +55,7 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
     --warmup_steps 100 \
     --optim adamw_torch \
     --fp16 \
-    --output_dir trained_super_adapter/unified_math/llama-7b-sparsity50-shears-math-adapter \
+    --output_dir trained_super_adapter/shears-llama-7b-50-math-super \
     --logging_steps 20 \
     --save_strategy epoch \
     --save_total_limit 2 \
@@ -74,11 +74,11 @@ CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main.py \
     --sparsity_ratio 0.4 \
     --sparsity_type unstructured \
     --save wanda_out \
-    --save_model unstructured_sparsity_models/llama-13b-sparsity40
+    --save_model unstructured_sparsity_models/shears-llama-13b-40-base
 
 CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
     --dataset_path datasets/math_10k.json \
-    --model_name_or_path unstructured_sparsity_models/llama-13b-sparsity40 \
+    --model_name_or_path unstructured_sparsity_models/shears-llama-13b-40-base \
     --do_train \
     --do_test \
     --per_device_train_batch_size 4 \
@@ -88,7 +88,7 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
     --warmup_steps 100 \
     --optim adamw_torch \
     --fp16 \
-    --output_dir trained_super_adapter/unified_math/llama-13b-sparsity40-shears-math-adapter \
+    --output_dir trained_super_adapter/shears-llama-13b-40-math-super \
     --logging_steps 20 \
     --save_strategy epoch \
     --save_total_limit 2 \
@@ -107,11 +107,11 @@ CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main.py \
     --sparsity_ratio 0.5 \
     --sparsity_type unstructured \
     --save wanda_out \
-    --save_model unstructured_sparsity_models/llama-13b-sparsity50
+    --save_model unstructured_sparsity_models/shears-llama-13b-50-base
 
 CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
     --dataset_path datasets/math_10k.json \
-    --model_name_or_path unstructured_sparsity_models/llama-13b-sparsity50 \
+    --model_name_or_path unstructured_sparsity_models/shears-llama-13b-50-base \
     --do_train \
     --do_test \
     --per_device_train_batch_size 4 \
@@ -121,7 +121,7 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
     --warmup_steps 100 \
     --optim adamw_torch \
     --fp16 \
-    --output_dir trained_super_adapter/unified_math/llama-13b-sparsity50-shears-math-adapter \
+    --output_dir trained_super_adapter/shears-llama-13b-50-math-super \
     --logging_steps 20 \
     --save_strategy epoch \
     --save_total_limit 2 \
@@ -139,7 +139,7 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_math.py \
 
 CUDA_VISIBLE_DEVICES=$DEVICES python run_commonsense.py \
     --dataset_path datasets/commonsense_170k.json \
-    --model_name_or_path unstructured_sparsity_models/llama-7b-sparsity40 \
+    --model_name_or_path unstructured_sparsity_models/shears-llama-7b-40-base \
     --do_train \
     --do_test \
     --per_device_train_batch_size 4 \
@@ -149,7 +149,7 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_commonsense.py \
     --warmup_steps 100 \
     --optim adamw_torch \
     --fp16 \
-    --output_dir trained_super_adapter/unified_commonsense/llama-7b-sparsity40-shears-commonsense-adapter \
+    --output_dir trained_super_adapter/shears-llama-7b-40-cs-super \
     --logging_steps 20 \
     --save_strategy epoch \
     --save_total_limit 2 \
@@ -164,7 +164,7 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_commonsense.py \
 
 CUDA_VISIBLE_DEVICES=$DEVICES python run_commonsense.py \
     --dataset_path datasets/commonsense_170k.json \
-    --model_name_or_path unstructured_sparsity_models/llama-7b-sparsity50 \
+    --model_name_or_path unstructured_sparsity_models/shears-llama-7b-50-base \
     --do_train \
     --do_test \
     --per_device_train_batch_size 4 \
@@ -174,7 +174,7 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_commonsense.py \
     --warmup_steps 100 \
     --optim adamw_torch \
     --fp16 \
-    --output_dir trained_super_adapter/unified_commonsense/llama-7b-sparsity50-shears-commonsense-adapter \
+    --output_dir trained_super_adapter/shears-llama-7b-50-cs-super \
     --logging_steps 20 \
     --save_strategy epoch \
     --save_total_limit 2 \
@@ -204,11 +204,11 @@ CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main_mpt.py \
     --sparsity_ratio 0.4 \
     --sparsity_type unstructured \
     --save wanda_out \
-    --save_model unstructured_sparsity_models/mpt-7b-sparsity40
+    --save_model unstructured_sparsity_models/shears-mpt-7b-40-base
 
 CUDA_VISIBLE_DEVICES=$DEVICES python run_gsm8k.py \
     --dataset_path None \
-    --model_name_or_path unstructured_sparsity_models/mpt-7b-sparsity40 \
+    --model_name_or_path unstructured_sparsity_models/shears-mpt-7b-40-base \
     --do_train \
     --do_test \
     --per_device_train_batch_size 8 \
@@ -218,7 +218,7 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_gsm8k.py \
     --warmup_steps 100 \
     --optim adamw_torch \
     --fp16 \
-    --output_dir trained_super_adapter/gsm8k/mpt-7b-sparsity40-shears-gsm8k-adapter \
+    --output_dir trained_super_adapter/shears-mpt-7b-40-gsm8k-super-adapter \
     --logging_steps 20 \
     --save_strategy epoch \
     --save_total_limit 2 \
@@ -237,11 +237,11 @@ CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main_mpt.py \
     --sparsity_ratio 0.5 \
     --sparsity_type unstructured \
     --save wanda_out \
-    --save_model unstructured_sparsity_models/mpt-7b-sparsity50
+    --save_model unstructured_sparsity_models/shears-mpt-7b-50-base
 
 CUDA_VISIBLE_DEVICES=$DEVICES python run_gsm8k.py \
     --dataset_path None \
-    --model_name_or_path unstructured_sparsity_models/mpt-7b-sparsity50 \
+    --model_name_or_path unstructured_sparsity_models/shears-mpt-7b-50-base \
     --do_train \
     --do_test \
     --per_device_train_batch_size 8 \
@@ -251,7 +251,7 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_gsm8k.py \
     --warmup_steps 100 \
     --optim adamw_torch \
     --fp16 \
-    --output_dir trained_super_adapter/gsm8k/mpt-7b-sparsity50-shears-gsm8k-adapter \
+    --output_dir trained_super_adapter/shears-mpt-7b-50-gsm8k-super-adapter \
     --logging_steps 20 \
     --save_strategy epoch \
     --save_total_limit 2 \
@@ -270,11 +270,11 @@ CUDA_VISIBLE_DEVICES=$DEVICES python wanda/main_mpt.py \
     --sparsity_ratio 0.6 \
     --sparsity_type unstructured \
     --save wanda_out \
-    --save_model unstructured_sparsity_models/mpt-7b-sparsity60
+    --save_model unstructured_sparsity_models/shears-mpt-7b-60-base
 
 CUDA_VISIBLE_DEVICES=$DEVICES python run_gsm8k.py \
     --dataset_path None \
-    --model_name_or_path unstructured_sparsity_models/mpt-7b-sparsity60 \
+    --model_name_or_path unstructured_sparsity_models/shears-mpt-7b-60-base \
     --do_train \
     --do_test \
     --per_device_train_batch_size 8 \
@@ -284,7 +284,7 @@ CUDA_VISIBLE_DEVICES=$DEVICES python run_gsm8k.py \
     --warmup_steps 100 \
     --optim adamw_torch \
     --fp16 \
-    --output_dir trained_super_adapter/gsm8k/mpt-7b-sparsity60-shears-gsm8k-adapter \
+    --output_dir trained_super_adapter/shears-mpt-7b-60-gsm8k-super-adapter \
     --logging_steps 20 \
     --save_strategy epoch \
     --save_total_limit 2 \
