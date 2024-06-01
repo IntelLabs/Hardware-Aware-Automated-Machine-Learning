@@ -19,7 +19,7 @@ def generate_prompt(instruction):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base_model_path", default="IntelLabs/shears-llama-7b-50-base", type=str)
+    parser.add_argument("--base_model_path", default="shears-llama-7b-50-base", type=str)
     parser.add_argument("--adapter_model_path", default="IntelLabs/shears-llama-7b-50-cs-heuristic-adapter", type=str)
     args = parser.parse_args()
     base_model_path = args.base_model_path

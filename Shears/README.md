@@ -12,12 +12,12 @@ This repo contains the code for **Shears**, a practical and novel solution that 
 
 We have released several models fine-tuned with Shears. Find them in the table below:
 
-| Name                                                                                                                  | Super-network                                                                                                     | Sparsity | Train Data                                                                                                               | Base Model
-|-----------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|----------|--------------------------------------------------------------------------------------------------------------------------| ------- | 
-| [shears-llama-7b-50-math-heuristic-adapter](https://huggingface.co/IntelLabs/shears-llama-7b-50-math-heuristic-adapter)               | [shears-llama-7b-50-math-super-adapter](https://huggingface.co/IntelLabs/shears-llama-7b-50-math-super-adapter)   | 50%      | [Unified Math](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)                  | [IntelLabs/shears-llama-7b-50-base](https://huggingface.co/IntelLabs/shears-llama-7b-50-base)
-| [shears-llama-7b-50-cs-heuristic-adapter](https://huggingface.co/IntelLabs/shears-llama-7b-50-cs-heuristic-adapter) | [shears-llama-7b-50-cs-super-adapter](https://huggingface.co/IntelLabs/shears-llama-7b-50-cs-super-adapter)       | 50%      | [Unified Commonsense](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/commonsense_170k.json)   | [IntelLabs/shears-llama-7b-50-base](https://huggingface.co/IntelLabs/shears-llama-7b-50-base)
-| [shears-llama-13b-50-math-heuristic-adapter](https://huggingface.co/IntelLabs/shears-llama-13b-50-math-heuristic-adapter)             | [shears-llama-13b-50-math-super-adapter](https://huggingface.co/IntelLabs/shears-llama-13b-50-math-super-adapter) | 50%      | [Unified Math](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)                  |  [IntelLabs/shears-llama-13b-50-base](https://huggingface.co/IntelLabs/shears-llama-13b-50-base)
-| [shears-mpt-7b-50-gsm8k-heuristic-adapter](https://huggingface.co/IntelLabs/shears-mpt-7b-50-gsm8k-heuristic-adapter)                 | [shears-mpt-7b-50-gsm8k-super-adapter](https://huggingface.co/IntelLabs/shears-mpt-7b-50-gsm8k-super-adapter)     | 50%      | [GSM8K](https://huggingface.co/datasets/gsm8k)                                                                           | [IntelLabs/shears-mpt-7b-50-base](https://huggingface.co/IntelLabs/shears-mpt-7b-50-base)
+| Name                                                                                                                  | Super-network                                                                                                     | Sparsity | Train Data                                                                                                               |
+|-----------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|----------|--------------------------------------------------------------------------------------------------------------------------|
+| [shears-llama-7b-50-math-heuristic-adapter](https://huggingface.co/IntelLabs/shears-llama-7b-50-math-heuristic-adapter)               | [shears-llama-7b-50-math-super-adapter](https://huggingface.co/IntelLabs/shears-llama-7b-50-math-super-adapter)   | 50%      | [Unified Math](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)                  |
+| [shears-llama-7b-50-cs-heuristic-adapter](https://huggingface.co/IntelLabs/shears-llama-7b-50-cs-heuristic-adapter) | [shears-llama-7b-50-cs-super-adapter](https://huggingface.co/IntelLabs/shears-llama-7b-50-cs-super-adapter)       | 50%      | [Unified Commonsense](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/commonsense_170k.json)   |
+| [shears-llama-13b-50-math-heuristic-adapter](https://huggingface.co/IntelLabs/shears-llama-13b-50-math-heuristic-adapter)             | [shears-llama-13b-50-math-super-adapter](https://huggingface.co/IntelLabs/shears-llama-13b-50-math-super-adapter) | 50%      | [Unified Math](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)                  |
+| [shears-mpt-7b-50-gsm8k-heuristic-adapter](https://huggingface.co/IntelLabs/shears-mpt-7b-50-gsm8k-heuristic-adapter)                 | [shears-mpt-7b-50-gsm8k-super-adapter](https://huggingface.co/IntelLabs/shears-mpt-7b-50-gsm8k-super-adapter)     | 50%      | [GSM8K](https://huggingface.co/datasets/gsm8k)                                                                           |
 
 ## Overview
 
@@ -57,17 +57,12 @@ The following code shows an example of loading our trained Shears model:
 from transformers import AutoModelForCausalLM
 from peft import PeftModel
 
-base_model = AutoModelForCausalLM.from_pretrained("IntelLabs/shears-llama-7b-50-base")
-model = PeftModel.from_pretrained(base_model, "IntelLabs/shears-llama-7b-50-math-heuristic-adapter")
+base_model = AutoModelForCausalLM.from_pretrained("IntelLabs/shears-mpt-7b-50-base")
+model = PeftModel.from_pretrained(base_model, "IntelLabs/shears-mpt-7b-50-gsm8k-heuristic-adapter")
 ```
 Below is an example of generating the instruction-following responses for some math reasoning samples:
 ```bash
-python example_math.py --base_model_path IntelLabs/shears-llama-7b-50-base --adapter_model_path IntelLabs/shears-llama-7b-50-math-heuristic-adapter
-```
-
-For some commonsense reasoning samples:
-```bash
-python example_commonsense.py --base_model_path IntelLabs/shears-llama-7b-50-base --adapter_model_path IntelLabs/shears-llama-7b-50-cs-heuristic-adapter
+python example_math.py --base_model_path IntelLabs/shears-mpt-7b-50-base --adapter_model_path IntelLabs/shears-mpt-7b-50-gsm8k-heuristic-adapter
 ```
 
 ### Training
@@ -83,7 +78,7 @@ git clone https://github.com/locuslab/wanda.git && cd wanda && git checkout 8e8f
 
 Below is an example command for unstructured sparsifying LLaMA-7B with Wanda, to achieve unstructured 50% sparsity (takes about five minutes).
 ```bash
-SPARSE_MODEL_PATH=unstructured_sparsity_models/shears-llama-7b-50-base
+SPARSE_MODEL_PATH=shears-llama-7b-50-base
 
 python wanda/main.py \
     --model yahma/llama-7b-hf \
@@ -165,7 +160,7 @@ python run_math.py \
 The above command can also be used to test the released model, for example,
 ```bash
 python run_math.py \
-    --model_name_or_path IntelLabs/shears-llama-7b-50-base \
+    --model_name_or_path $SPARSE_MODEL_PATH \
     --lora \
     --lora_weights IntelLabs/shears-llama-7b-50-math-super-adapter \
     --do_test \
