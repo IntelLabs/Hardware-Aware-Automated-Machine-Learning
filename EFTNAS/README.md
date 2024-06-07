@@ -188,11 +188,11 @@ Please refer to `running_commands` for all commands related to reproducing the p
 ```bibtex
 @inproceedings{
   eftnas2024,
-  title={Searching for Efficient Language Models in First-Order Weight-Reordered Super-Networks},
+  title={EFTNAS: Searching for Efficient Language Models in First-Order Weight-Reordered Super-Networks},
   author={J. Pablo Munoz and Yi Zheng and Nilesh Jain},
   booktitle={The 2024 Joint International Conference on Computational Linguistics, Language Resources and Evaluation},
   year={2024},
-  url={}
+  url={https://aclanthology.org/2024.lrec-main.497/}
 }
 ```
 
