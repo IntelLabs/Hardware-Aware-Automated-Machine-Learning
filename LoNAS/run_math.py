@@ -36,6 +36,7 @@ from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import E
 from nncf.experimental.torch.nas.bootstrapNAS.training.model_creator_helpers import (
     create_compressed_model_from_algo_names,
 )
+from nncf.experimental.torch.nas.bootstrapNAS import BaseSearchAlgorithm
 from nncf.torch.model_creation import create_nncf_network
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
@@ -588,6 +589,82 @@ def main():
             }
             trainer.save_metrics("eval", avg_metrics)
             trainer.log_metrics("eval", avg_metrics)
+
+    # Searching
+    if training_args.do_search and nncf_config is not None and training_args.local_rank <= 0:
+        logger.info("*** Search ***")
+        trainer.compression_ctrl.multi_elasticity_handler.enable_all()
+        search_algo = BaseSearchAlgorithm.from_config(trainer.model, trainer.compression_ctrl, nncf_config)
+
+        def is_number(input_str):
+            try:
+                float(input_str)
+                return True
+            except ValueError:
+                return False
+
+        def validate_model_fn(model_, eval_dataset):
+            correct = 0
+            miss = 0.001
+            for data in tqdm(eval_dataset):
+                instruction = data.get('instruction')
+                outputs = evaluate_one_sample(instruction, model=model_)
+                label = data.get('answer')
+                if is_number(label):
+                    if isinstance(label, str):
+                        label = float(label)
+                    predict = extract_answer_number("mawps", outputs)
+                    if abs(label - predict) <= miss:
+                        correct += 1
+                else:
+                    predict = extract_answer_letter(outputs)
+                    if label == predict:
+                        correct += 1
+            acc = correct / len(eval_dataset)
+            return acc
+
+        # Test Maximal subnetwork and Heuristic subnetwork on the validation dataset
+        # Maximal
+        trainer.compression_ctrl.multi_elasticity_handler.activate_supernet()
+        max_eval_acc = validate_model_fn(trainer.model, eval_dataset)
+
+        # Heuristic
+        compression_ctrl.multi_elasticity_handler.width_handler.width_num_params_indicator = -1
+        heuristic_config = {k: v[(len(v) - 1) // 2]
+                            for k, v in compression_ctrl.multi_elasticity_handler.width_search_space.items()}
+        heuristic_config = {
+            ElasticityDim.WIDTH: heuristic_config
+        }
+        trainer.compression_ctrl.multi_elasticity_handler.activate_subnet_for_config(heuristic_config)
+        heu_eval_acc = validate_model_fn(trainer.model, eval_dataset)
+
+        metrics = {
+            "val_maximal_accuracy": max_eval_acc,
+            "val_heuristic_accuracy": heu_eval_acc,
+        }
+        trainer.save_metrics("eval", metrics)
+        trainer.log_metrics("eval", metrics)
+
+        elasticity_ctrl, best_config, performance_metrics = search_algo.run(
+            validate_model_fn, eval_dataset, training_args.output_dir
+        )
+
+        search_algo.search_progression_to_csv()
+        search_algo.evaluators_to_csv()
+        search_algo.visualize_search_progression()
+
+        logger.info("Best config: {best_config}".format(best_config=best_config))
+        logger.info("Performance metrics: {performance_metrics}".format(performance_metrics=performance_metrics))
+        trainer.save_metrics("eval", {
+            "performance_metrics": list(performance_metrics)
+        })
+
+        # test best config
+        trainer.compression_ctrl.multi_elasticity_handler.activate_subnet_for_config(best_config)
+        best_eval_acc = validate_model_fn(trainer.model, eval_dataset)
+        trainer.save_metrics("eval", {
+            "val_best_accuracy": best_eval_acc
+        })
 
     kwargs = {"finetuned_from": model_args.model_name_or_path}
 

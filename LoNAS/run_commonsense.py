@@ -32,6 +32,7 @@ from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import E
 from nncf.experimental.torch.nas.bootstrapNAS.training.model_creator_helpers import (
     create_compressed_model_from_algo_names,
 )
+from nncf.experimental.torch.nas.bootstrapNAS import BaseSearchAlgorithm
 from nncf.torch.model_creation import create_nncf_network
 
 check_min_version("4.31.0")
@@ -560,6 +561,83 @@ def main():
             }
             trainer.save_metrics("eval", avg_metrics)
             trainer.log_metrics("eval", avg_metrics)
+
+    # Searching
+    if training_args.do_search and nncf_config is not None and training_args.local_rank <= 0:
+        logger.info("*** Search ***")
+        trainer.compression_ctrl.multi_elasticity_handler.enable_all()
+        search_algo = BaseSearchAlgorithm.from_config(trainer.model, trainer.compression_ctrl, nncf_config)
+
+        def validate_model_fn(model_, eval_dataset):
+            correct = 0
+            for data in eval_dataset:
+                instruction = data.get('instruction')
+                output = evaluate_one_sample(instruction, model=model_)
+                label = data.get('answer')
+
+                dataset_name = None
+                # which dataset
+                # TODO: Refactor hard-coded values for better flexibility and maintainability.
+                if label in ['true', 'false']:
+                    dataset_name = "boolq"
+                elif 'solution' in label:
+                    dataset_name = "piqa"
+                elif 'answer' in label:
+                    dataset_name = "social_i_qa"    # "ARC-Challenge", "ARC-Easy", "openbookqa"
+                elif 'ending' in label:
+                    dataset_name = "hellaswag"
+                elif 'option' in label:
+                    dataset_name = "winogrande"
+
+                predict = extract_answer(dataset_name, output)
+                if label == predict:
+                    correct += 1
+
+            acc = correct / len(eval_dataset)
+            return acc
+
+        # Test Maximal subnetwork and Heuristic subnetwork on the validation dataset
+        # Maximal
+        trainer.compression_ctrl.multi_elasticity_handler.activate_supernet()
+        max_eval_acc = validate_model_fn(trainer.model, eval_dataset)
+
+        # Heuristic
+        compression_ctrl.multi_elasticity_handler.width_handler.width_num_params_indicator = -1
+        heuristic_config = {k: v[(len(v) - 1) // 2]
+                            for k, v in compression_ctrl.multi_elasticity_handler.width_search_space.items()}
+        heuristic_config = {
+            ElasticityDim.WIDTH: heuristic_config
+        }
+        trainer.compression_ctrl.multi_elasticity_handler.activate_subnet_for_config(heuristic_config)
+        heu_eval_acc = validate_model_fn(trainer.model, eval_dataset)
+
+        metrics = {
+            "val_maximal_accuracy": max_eval_acc,
+            "val_heuristic_accuracy": heu_eval_acc,
+        }
+        trainer.save_metrics("eval", metrics)
+        trainer.log_metrics("eval", metrics)
+
+        elasticity_ctrl, best_config, performance_metrics = search_algo.run(
+            validate_model_fn, eval_dataset, training_args.output_dir
+        )
+
+        search_algo.search_progression_to_csv()
+        search_algo.evaluators_to_csv()
+        search_algo.visualize_search_progression()
+
+        logger.info("Best config: {best_config}".format(best_config=best_config))
+        logger.info("Performance metrics: {performance_metrics}".format(performance_metrics=performance_metrics))
+        trainer.save_metrics("eval", {
+            "performance_metrics": list(performance_metrics)
+        })
+
+        # test best config
+        trainer.compression_ctrl.multi_elasticity_handler.activate_subnet_for_config(best_config)
+        best_eval_acc = validate_model_fn(trainer.model, eval_dataset)
+        trainer.save_metrics("eval", {
+            "val_best_accuracy": best_eval_acc
+        })
 
     kwargs = {"finetuned_from": model_args.model_name_or_path}
 
