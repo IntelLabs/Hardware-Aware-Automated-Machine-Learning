@@ -2,6 +2,10 @@
 
 This repository contains instructions and examples for efficient neural architecture discovery and optimization solutions developed at Intel Labs. 
 
+### :fire:[SQFT: Low-cost Model Adaptation in Low-precision Sparse Foundation Models](./SQFT/README.md)
+
+SQFT is a solution for low-precision sparse parameter-efficient fine-tuning (PEFT) of large models. It includes an innovative strategy that enables the merging of sparse weights with low-rank adapters without losing sparsity and accuracy, overcoming the limitations of previous approaches. SQFT also addresses the challenge of having quantized weights and adapters with different numerical precisions, enabling merging in the desired numerical format without sacrificing accuracy.
+
 ### :fire:[Shears: Unstructured Sparsity with Neural Low-rank Adapter Search](./Shears/README.md) 
 
 Shears integrates cost-effective

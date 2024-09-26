@@ -1,0 +1,44 @@
+{
+    "input_info": [
+        {
+            "sample_size": [1, 256],
+            "type": "long",
+            "keyword": "input_ids"
+        },
+        {
+            "sample_size": [1, 256],
+            "type": "long",
+            "keyword": "attention_mask"
+        }
+    ],
+    "bootstrapNAS": {
+        "training": {
+            "algorithm": "progressive_shrinking",
+            "frozen_layers_allowed": true,
+            "progressivity_of_elasticity": ["width"],
+            "batchnorm_adaptation": {
+                "num_bn_adaptation_samples": 0
+            },
+            "schedule": {
+                "list_stage_descriptions": [
+                    {"train_dims": ["width"], "epochs": -1, "depth_indicator": 1, "width_indicator": 5, "init_lr": -1, "epochs_lr": -1, "sample_rate": 1}
+                ]
+            },
+            "elasticity": {
+                "available_elasticity_dims": ["width"],
+                "width": {
+                    "overwrite_groups": [
+                        [
+                            "{re}PeftModelForCausalLM/LoraModel[base_model]/MistralForCausalLM[model]/MistralModel[model]/ModuleList[layers]/MistralDecoderLayer[{*}]/MistralSdpaAttention[self_attn]/QuantLinear[q_proj]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "{re}PeftModelForCausalLM/LoraModel[base_model]/MistralForCausalLM[model]/MistralModel[model]/ModuleList[layers]/MistralDecoderLayer[{*}]/MistralSdpaAttention[self_attn]/QuantLinear[k_proj]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0",
+                            "{re}PeftModelForCausalLM/LoraModel[base_model]/MistralForCausalLM[model]/MistralModel[model]/ModuleList[layers]/MistralDecoderLayer[{*}]/MistralSdpaAttention[self_attn]/QuantLinear[v_proj]/ModuleDict[lora_A]/NNCFLinear[default]/linear_0"
+                        ]
+                    ],
+                    "overwrite_groups_widths": [
+                        [-1]
+                    ]
+                }
+            }
+        }
+    }
+}
