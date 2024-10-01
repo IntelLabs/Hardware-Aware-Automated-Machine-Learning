@@ -15,10 +15,13 @@ We have released several foundation models (sparse or sparse-and-quantized) for 
 
 | Source Model                                                                      | Sparsity | Sparse Model                                                                                         | Sparse-and-Quantized Model                                                                                       |
 |-----------------------------------------------------------------------------------|----------|------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
-| [Meta-Llama-3-8B](https://huggingface.co/meta-llama/Meta-Llama-3-8B)              | 50%      | [IntelLabs/sqft-llama-3-8b-50-base](https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-base)        | [IntelLabs/sqft-llama-3-8b-50-base-gptq](https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-base-gptq)          |
 | [Mistral-7B-v0.3](https://huggingface.co/mistralai/Mistral-7B-v0.3)               | 50%      | [IntelLabs/sqft-mistral-7b-v0.3-50-base](https://huggingface.co/IntelLabs/sqft-mistral-7b-v0.3-50-base) | [IntelLabs/sqft-mistral-7b-v0.3-50-base-gptq](https://huggingface.co/IntelLabs/sqft-mistral-7b-v0.3-50-base-gptq) |
 | [Phi-3-mini-4k-instruct](https://huggingface.co/microsoft/Phi-3-mini-4k-instruct) | 50%      | [IntelLabs/sqft-phi-3-mini-4k-50-base](https://huggingface.co/IntelLabs/sqft-phi-3-mini-4k-50-base)  | [IntelLabs/sqft-phi-3-mini-4k-50-base-gptq](https://huggingface.co/IntelLabs/sqft-phi-3-mini-4k-50-base-gptq)     |
+| [Meta-Llama-3-8B](https://huggingface.co/meta-llama/Meta-Llama-3-8B)              | 50%      | [IntelLabs/sqft-llama-3-8b-50-base]()        | [IntelLabs/sqft-llama-3-8b-50-base-gptq]()          |
+`*` **Llama-3 models are under review** 
 
+[//]: # (https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-base)
+[//]: # (https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-base-gptq)
 
 ## Setup
 
@@ -304,14 +307,6 @@ lm_eval --model hf \
 
 ## Released Fine-tuned Models 🤗
 
-- Meta-Llama-3-8B
-
-| Base Model                                                                                     | Task   | Method                | Fine-tuned Model                                                                                                                     |
-|------------------------------------------------------------------------------------------------|--------|-----------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| [sqft-llama-3-8b-50-base](https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-base)            | GSM8K  | SQFT + SparsePEFT     | [sqft-llama-3-8b-50-gptq-gsm8k-heu-adapter](https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-gptq-gsm8k-heu-adapter)              |
-| [sqft-llama-3-8b-50-base-gptq](https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-base-gptq)  | GSM8K  | SQFT                  | [sqft-sparsepeft-llama-3-8b-50-gsm8k-heu](https://huggingface.co/IntelLabs/sqft-sparsepeft-llama-3-8b-50-gsm8k-heu)                  |
-| [sqft-llama-3-8b-50-base-gptq](https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-base-gptq)  | GSM8K  | SQFT + QA-SparsePEFT  | [sqft-qa-sparsepeft-llama-3-8b-50-gptq-gsm8k-heu](https://huggingface.co/IntelLabs/sqft-qa-sparsepeft-llama-3-8b-50-gptq-gsm8k-heu ) |
-
 - Mistral-7B-v0.3
 
 | Base Model                                                                                               | Task  | Method                | Fine-tuned Model                                                                                                                              |
@@ -334,13 +329,34 @@ lm_eval --model hf \
 | [sqft-phi-3-mini-4k-50-base-gptq](https://huggingface.co/IntelLabs/sqft-phi-3-mini-4k-50-base-gptq) | CS   | SQFT                  | [sqft-sparsepeft-phi-3-mini-4k-50-cs-heu](https://huggingface.co/IntelLabs/sqft-sparsepeft-phi-3-mini-4k-50-cs-heu)                     |
 | [sqft-phi-3-mini-4k-50-base-gptq](https://huggingface.co/IntelLabs/sqft-phi-3-mini-4k-50-base-gptq) | CS   | SQFT + QA-SparsePEFT  | [sqft-qa-sparsepeft-phi-3-mini-4k-50-gptq-cs-heu](https://huggingface.co/IntelLabs/sqft-qa-sparsepeft-phi-3-mini-4k-50-gptq-cs-heu)     |
 
+- Meta-Llama-3-8B
+
+| Base Model                                                                                     | Task   | Method                | Fine-tuned Model                                                                                                                    |
+|------------------------------------------------------------------------------------------------|--------|-----------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| [sqft-llama-3-8b-50-base]()            | GSM8K  | SQFT + SparsePEFT     | [sqft-llama-3-8b-50-gptq-gsm8k-heu-adapter]()             |
+| [sqft-llama-3-8b-50-base-gptq]()  | GSM8K  | SQFT                  | [sqft-sparsepeft-llama-3-8b-50-gsm8k-heu]()                 |
+| [sqft-llama-3-8b-50-base-gptq]()  | GSM8K  | SQFT + QA-SparsePEFT  | [sqft-qa-sparsepeft-llama-3-8b-50-gptq-gsm8k-heu]() |
+`*` **Llama-3-8B fine-tuned models are under review** 
+
+[//]: # (https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-base)
+
+[//]: # (https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-gptq-gsm8k-heu-adapter)
+
+[//]: # (https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-base-gptq)
+
+[//]: # (https://huggingface.co/IntelLabs/sqft-sparsepeft-llama-3-8b-50-gsm8k-heu)
+
+[//]: # (https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-base-gptq)
+
+[//]: # (https://huggingface.co/IntelLabs/sqft-qa-sparsepeft-llama-3-8b-50-gptq-gsm8k-heu)
+
 ## Citation
 If you find SQFT's code and paper helpful, please kindly cite:
 ```bibtex
 @article{munoz2024sqft,
   title = {SQFT: Low-cost Model Adaptation in Low-precision Sparse Foundation Models},
-  author = {J. Pablo Munoz and Jinjie Yuan and Nilesh Jain},
-  journal = {},
+  author = {J. Pablo Muñoz and Jinjie Yuan and Nilesh Jain},
+  journal = {The 2024 Conference on Empirical Methods in Natural Language Processing (Findings)},
   year = {2024},
   url = {}
 }
