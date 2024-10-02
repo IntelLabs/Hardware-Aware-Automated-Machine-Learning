@@ -17,8 +17,9 @@ We have released several foundation models (sparse or sparse-and-quantized) for 
 |-----------------------------------------------------------------------------------|----------|------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
 | [Mistral-7B-v0.3](https://huggingface.co/mistralai/Mistral-7B-v0.3)               | 50%      | [IntelLabs/sqft-mistral-7b-v0.3-50-base](https://huggingface.co/IntelLabs/sqft-mistral-7b-v0.3-50-base) | [IntelLabs/sqft-mistral-7b-v0.3-50-base-gptq](https://huggingface.co/IntelLabs/sqft-mistral-7b-v0.3-50-base-gptq) |
 | [Phi-3-mini-4k-instruct](https://huggingface.co/microsoft/Phi-3-mini-4k-instruct) | 50%      | [IntelLabs/sqft-phi-3-mini-4k-50-base](https://huggingface.co/IntelLabs/sqft-phi-3-mini-4k-50-base)  | [IntelLabs/sqft-phi-3-mini-4k-50-base-gptq](https://huggingface.co/IntelLabs/sqft-phi-3-mini-4k-50-base-gptq)     |
-| [Meta-Llama-3-8B](https://huggingface.co/meta-llama/Meta-Llama-3-8B)              | 50%      | [IntelLabs/sqft-llama-3-8b-50-base]()        | [IntelLabs/sqft-llama-3-8b-50-base-gptq]()          |
-`*` **Llama-3 models are under review** 
+| [Meta-Llama-3-8B](https://huggingface.co/meta-llama/Meta-Llama-3-8B)              | 50%      | IntelLabs/sqft-llama-3-8b-50-base<sup>*</sup>        | IntelLabs/sqft-llama-3-8b-50-base-gptq<sup>*</sup>         |
+
+<sup>*</sup> *Llama-3 models are currently under internal review and will be released soon.* 
 
 [//]: # (https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-base)
 [//]: # (https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-base-gptq)
@@ -333,10 +334,11 @@ lm_eval --model hf \
 
 | Base Model                                                                                     | Task   | Method                | Fine-tuned Model                                                                                                                    |
 |------------------------------------------------------------------------------------------------|--------|-----------------------|-------------------------------------------------------------------------------------------------------------------------------------|
-| [sqft-llama-3-8b-50-base]()            | GSM8K  | SQFT + SparsePEFT     | [sqft-llama-3-8b-50-gptq-gsm8k-heu-adapter]()             |
-| [sqft-llama-3-8b-50-base-gptq]()  | GSM8K  | SQFT                  | [sqft-sparsepeft-llama-3-8b-50-gsm8k-heu]()                 |
-| [sqft-llama-3-8b-50-base-gptq]()  | GSM8K  | SQFT + QA-SparsePEFT  | [sqft-qa-sparsepeft-llama-3-8b-50-gptq-gsm8k-heu]() |
-`*` **Llama-3-8B fine-tuned models are under review** 
+| sqft-llama-3-8b-50-base<sup>*</sup>            | GSM8K  | SQFT + SparsePEFT     | sqft-llama-3-8b-50-gptq-gsm8k-heu-adapter             |
+| sqft-llama-3-8b-50-base-gptq  | GSM8K  | SQFT                  | sqft-sparsepeft-llama-3-8b-50-gsm8k-heu                 |
+| sqft-llama-3-8b-50-base-gptq  | GSM8K  | SQFT + QA-SparsePEFT  | sqft-qa-sparsepeft-llama-3-8b-50-gptq-gsm8k-heu |
+
+<sup>*</sup> *Llama-3 models are currently under internal review and will be released soon.* 
 
 [//]: # (https://huggingface.co/IntelLabs/sqft-llama-3-8b-50-base)
 
