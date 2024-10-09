@@ -1,12 +1,12 @@
 # SQFT: Low-cost Model Adaptation in Low-precision Sparse Foundation Models
 
-Official implementation of [SQFT: Low-cost Model Adaptation in Low-precision Sparse Foundation Models]().
+Official implementation of [SQFT: Low-cost Model Adaptation in Low-precision Sparse Foundation Models](https://arxiv.org/pdf/2410.03750).
 
 This repo contains the code for **SQFT**, an end-to-end solution for low-precision sparse parameter-efficient fine-tuning of LLMs. SQFT allows for effective model manipulation in resource-constrained environments. 
 Please refer to our paper for more details.
 
 ## News
-- **[2024.09.24]**  **SQFT** paper has been released ([link]()) and **accepted at EMNLP 2024 Findings**. :books:
+- **[2024.09.24]**  **SQFT** paper has been released ([link](https://arxiv.org/pdf/2410.03750)) and **accepted at EMNLP 2024 Findings**. :books:
 - **[2024.09.24]** Release the code for **SQFT**. :tada:
 
 ## Released Foundation Models 🤗
