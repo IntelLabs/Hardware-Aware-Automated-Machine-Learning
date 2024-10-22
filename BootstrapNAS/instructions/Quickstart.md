@@ -51,7 +51,7 @@ python bootstrap_nas.py -m train \
 
 
 ### Expected Output Files after executing BootstrapNAS
-The output of running ```bootstrap_nas.py``` will be a sub-network configuration that has an accuracy similar to the input model (by default a $\pm$1% absolute difference in accuracy is allowed), but with improvements in MACs. Format: ([MACs_subnet, ACC_subnet]). 
+The output of running ```bootstrap_nas.py``` will be a sub-network configuration with an accuracy similar to the input model (by default a $\pm$1% absolute difference in accuracy is allowed), but with improvements in MACs. Format: ([MACs_subnet, ACC_subnet]). 
 
 Several files are saved to your `log_dir` after the training has ended: 
 
@@ -62,9 +62,9 @@ Several files are saved to your `log_dir` after the training has ended:
 - `last_elasticity.pth`- Super-network's elasticity information. This file can be used when loading super-networks for searching or inspection.
 - `last_model_weights.pth`- Super-network's weights after training. 
 - `snapshot.tar.gz` - Copy of the code used for this run. 
-- `subnetwork_best.pth` - Dictionary with the configuration of the best sub-network. Best defined as a sub-network that performs in the Pareto front, and that deviates a maximum `acc_delta` from original model.
+- `subnetwork_best.pth` - Dictionary with the configuration of the best sub-network. Best is defined as a sub-network that performs in the Pareto front and deviates a maximum `acc_delta` from the original model.
 - `supernet_{best, last}.pth` - Super-network weights at its best and last state. 
 
 If the user wants to have a CSV output file of the search progression, ```search_algo.search_progression_to_csv()``` can be called after running the search step.
 
-For a visualization of the search progression please use ```search_algo.visualize_search_progression()``` after the search has concluded. A PNG file will be generated. 
+For a visualization of the search progression, please use ```search_algo.visualize_search_progression()``` after the search has concluded. A PNG file will be generated. 

@@ -74,15 +74,15 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python examples/pytorch/text-classification/run_
 - `--nncf_config`: the NNCF configuration including the config of movement sparsity
 (refer to [MovementSparsity.md](https://github.com/openvinotoolkit/nncf/blob/develop/nncf/experimental/torch/sparsity/movement/MovementSparsity.md)
 for more details).
-- `--output_dir`: the directory to save importance weights.
+- `--output_dir`: the directory used to save the weights' importance information.
 
 After movement sparsity training, the importance for the pretrained weights of `--model_name_or_path` can 
-be obtained in the `--output_dir` directory, which will be utilized for search space generation and weight-reorder during 
+be obtained in the `--output_dir` directory, which will be utilized for search space generation and weight reorder during 
 NAS training.
 
 #### Generate search space
 
-Based on the trained weight importance, EFTNAS has a well-designed algorithm to automatically generate 
+Based on the trained weight importance, EFTNAS has a well-designed algorithm to generate automatically 
 the search space for the super-network.
 Below is an example command for search space generation using the weight importance:
 ```bash
@@ -101,7 +101,7 @@ The generated search space will be saved in `--target_config`.
 ### Step 2. Training
 
 Once the weight importance scores and the NNCF configuration with the automatically generated search space are obtained, 
-EFTNAS conducts NAS training utilizing based on the information from Step 1. 
+EFTNAS conducts NAS training based on the information from Step 1. 
 
 Due to the feature of BootstrapNAS, we need to manually set the epoch and learning rate for NAS training in the 
 NNCF configuration (please refer to [BootstrapNAS.md](https://github.com/openvinotoolkit/nncf/blob/develop/nncf/experimental/torch/nas/bootstrapNAS/BootstrapNAS.md)

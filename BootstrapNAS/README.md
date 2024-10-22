@@ -16,7 +16,7 @@ If you already have a super-network trained with BootstrapNAS, please follow the
 
 More information about BootstrapNAS is available in our papers:
 
-[Automated Super-Network Generation for Scalable Neural Architecture Search](https://openreview.net/attachment?id=HK-zmbTB8gq&name=main_paper_and_supplementary_material).
+[Automated Super-Network Generation for Scalable Neural Architecture Search](https://openreview.net/pdf?id=HK-zmbTB8gq).
 
 ```bibtex
   @inproceedings{
@@ -25,7 +25,7 @@ More information about BootstrapNAS is available in our papers:
     author={Muñoz, J. Pablo and Lyalyushkin, Nikolay and Lacewell, Chaunte and Senina, Anastasia and Cummings, Daniel and Sarah, Anthony  and Kozlov, Alexander and Jain, Nilesh},
     booktitle={First Conference on Automated Machine Learning (Main Track)},
     year={2022},
-    url={https://openreview.net/forum?id=HK-zmbTB8gq}
+    url={https://openreview.net/pdf?id=HK-zmbTB8gq}
   }
 ```
 [Enabling NAS with Automated Super-Network Generation](https://arxiv.org/abs/2112.10878)
@@ -35,15 +35,10 @@ More information about BootstrapNAS is available in our papers:
   bootstrapNAS,
   author    = {Muñoz, J. Pablo  and Lyalyushkin, Nikolay  and Akhauri, Yash and Senina, Anastasia and Kozlov, Alexander  and Jain, Nilesh},
   title     = {Enabling NAS with Automated Super-Network Generation},
-  journal   = {CoRR},
-  volume    = {abs/2112.10878},
-  year      = {2021},
-  url       = {https://arxiv.org/abs/2112.10878},
-  eprinttype = {arXiv},
-  eprint    = {2112.10878},
-  timestamp = {Tue, 04 Jan 2022 15:59:27 +0100},
-  biburl    = {https://dblp.org/rec/journals/corr/abs-2112-10878.bib},
-  bibsource = {dblp computer science bibliography, https://dblp.org}
+  journal   = {1st International Workshop on Practical
+Deep Learning in the Wild at AAAI},
+  year      = {2022},
+  url       = {https://practical-dl.github.io/2022/short_paper/21.pdf},
 }
 ```
 

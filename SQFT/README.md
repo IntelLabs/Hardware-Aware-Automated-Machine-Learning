@@ -117,7 +117,7 @@ quantized_sparse_base_model_path=sqft-llama-3-8b-50-base-gptq
 python utils/quantization.py --base_model_path ${sparse_base_model_path} --output_dir ${quantized_sparse_base_model_path}
 ```
 
-You can also skip the quantization step and adopt our released quantized models (find them in Sparse-and-Quantized Model of [this Table](#released-foundation-models-)). 
+You can also skip the quantization step and adopt our released quantized models (find them in the *Sparse-and-Quantized Model* column of [this Table](#released-foundation-models-)). 
 
 #### :hammer_and_wrench: SQFT
 
@@ -152,7 +152,7 @@ python run_standard_tuning.py \
     --search_space ${search_space} # low-rank search space
 ```
 
-After the completion of the super-adapter training, the command to extract the heuristic sub-adapter is as follows. 
+After completing the super-adapter training, the command to extract the heuristic sub-adapter is as follows. 
 Additionally, more powerful sub-adapters can be obtained through other advanced search algorithms.
 
 ```bash

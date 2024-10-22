@@ -55,7 +55,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_commonsense.py \
 
 The `nncf_config` indicates the NNCF configuration encompassing the search space for elastic adapters and modules of the base model (e.g., `q_proj`). 
 The implementation of the elastic modules leverages the BootstrapNAS feature of [OpenVINO™ NNCF](https://github.com/openvinotoolkit/nncf).
-And we employ the stage LR scheduler within NNCF, so the learning rate schedule is specified within the NNCF configuration file, 
+We employ the stage LR scheduler within NNCF, so the learning rate schedule is specified within the NNCF configuration file, 
 rather than within the arguments of `TrainingArguments`. For instance, 
 ```json
 "schedule": {
@@ -128,9 +128,8 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_commonsense.py \
 ```
 
 The argument `--val_set_size 1000` signifies the utilization of 1k validation samples to evaluate each discovered 
-subnetwork. After running this command, results of the 200 identified subnetworks (`"num_evals": 200` set in `search` field of NNCF config) 
-can be obtained in the `--output_dir` folder, including `search_progression.png` and `search_progression.csv`. 
-From these results, we can select the subnetwork configurations that best meets different requirements.
+subnetwork. After running this command, the results of the 200 identified subnetworks (`"num_evals": 200` set in the `search` field of NNCF config) will be placed in the `--output_dir` folder, including `search_progression.png` and `search_progression.csv`. 
+From these results, we can select the subnetwork configurations that best meet different requirements.
 
 
 ## Released Models

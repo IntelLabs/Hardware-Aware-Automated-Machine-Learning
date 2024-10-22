@@ -10,7 +10,7 @@ This repo contains the code for **Shears**, a practical and novel solution that 
 
 ## Released Models 🤗
 
-We have released several models fine-tuned with Shears. Find them in the table below:
+We have released several models fine-tuned with Shears. Find them in the Table below:
 
 | Name                                                                                                                  | Super-network                                                                                                     | Sparsity | Train Data                                                                                                               |
 |-----------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|----------|--------------------------------------------------------------------------------------------------------------------------|
@@ -76,7 +76,7 @@ Clone the [Wanda](https://github.com/locuslab/wanda) repo:
 git clone https://github.com/locuslab/wanda.git && cd wanda && git checkout 8e8fc87 && cd ..
 ```
 
-Below is an example command for unstructured sparsifying LLaMA-7B with Wanda, to achieve unstructured 50% sparsity (takes about five minutes).
+Below is an example command for unstructured sparsifying LLaMA-7B with Wanda to achieve unstructured 50% sparsity (takes about five minutes).
 ```bash
 SPARSE_MODEL_PATH=shears-llama-7b-50-base
 
@@ -131,9 +131,9 @@ python run_math.py \
     --nncf_config $NNCF_CONFIG
 ```
 
-`--nncf_config` indicates the NNCF configuration including the search space for elastic adapters.
+`--nncf_config` indicates the NNCF configuration, including the search space for elastic adapters.
 To implement the elastic adapter, we apply the [BootstrapNAS](https://github.com/openvinotoolkit/nncf/tree/develop/nncf/experimental/torch/nas/bootstrapNAS) feature supported in [OpenVINO™ NNCF](https://github.com/openvinotoolkit/nncf), which provides a suite of compression algorithms for neural network optimization.
-The NNCF configuration details can be found in [nncf_config.md](./nncf_config/nncf_config.md).
+The NNCF configuration details are in [nncf_config.md](./nncf_config/nncf_config.md).
 After training, the trained super-adapter will be saved in `ADAPTER_MODEL_PATH`.
 
 ### Evaluation
@@ -202,14 +202,13 @@ Please refer to [running_commands](./running_commands) for all commands related 
 
 ## Explore a trained super-adapter
 
-To enhance exploration of the super-network trained using the Shears method, we provide an illustrative example `search/load_and_explore_supernet.ipynb`. This notebook demonstrates the direct loading of a Shears super-network and the extraction of various subnetworks from it. 
+To enhance exploration of the super-network trained using the Shears method, we provide an illustrative example `search/load_and_explore_supernet.ipynb`. This notebook demonstrates the direct loading of a Shears super-network and the extraction of various subnetworks. 
 This facilitates users in applying their own search algorithms and evaluation metrics to extract subnetworks tailored to their specific requirements.
 
 ## Extract and save a sub-adapter
 
 After training, we obtain the weights of the super-adapter stored in `ADAPTER_MODEL_PATH` and activate different 
-sub-networks using NNCF. However, once a particular sub-network we need is identified, it's no longer necessary to 
-activate just that one sub-network using NNCF. Instead, what we need is a clean, pruned, and directly-loadable 
+sub-networks using NNCF. However, once a particular sub-network we need is identified, activating just that one sub-network using NNCF is no longer necessary. Instead, what we need is a clean, pruned, and directly-loadable 
 sub-network. For this purpose, we provide a function to extract/save any sub-adapter (please refer to the end of 
 `search/load_and_explore_supernet.ipynb`). Below is an example to obtain the heuristic sub-adapter of a trained 
 super-adapter:

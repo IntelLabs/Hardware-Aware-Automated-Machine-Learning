@@ -6,5 +6,3 @@
 
 ### [Configuration](https://github.com/IntelLabs/Hardware-Aware-Automated-Machine-Learning/tree/main/BootstrapNAS/instructions/Configuration.md)
 
-More detailed guides coming soon.
-
