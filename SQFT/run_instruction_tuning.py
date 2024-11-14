@@ -101,7 +101,6 @@ class ModelArguments:
     non_quant_model_name_or_path: str = field(
         default=None, metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
-    lora_weights: str = field(default=None, metadata={"help": "Path to LoRA weights."})
 
 
 def main():
@@ -183,6 +182,7 @@ def main():
         compression_ctrl, model = create_compressed_model_from_algo_names(
             nncf_network, nncf_config, algo_names=["progressive_shrinking"]
         )
+
     # Init SQFTQuantAwareLinear params
     if training_args.quantization_aware:
         from modules.sqft_linear import SQFTQuantAwareLinear
