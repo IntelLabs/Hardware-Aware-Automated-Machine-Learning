@@ -11,6 +11,8 @@ from transformers import AutoTokenizer
 from peft import PeftModel
 
 
+DATASETS = ["mawps", "SVAMP", "gsm8k"]
+
 def extract_answer_number(dataset_name: str, sentence: str) -> float:
     """
     Extracts the numerical answer from a given sentence based on the dataset type.
@@ -194,9 +196,7 @@ def main():
     dtype = args.dtype
     adapter_model_path = args.adapter_model_path
     output_dir = args.output_dir
-
     os.makedirs(output_dir, exist_ok=True)
-    datasets = ["mawps", "SVAMP", "gsm8k"]
 
     tokenizer = AutoTokenizer.from_pretrained(
         base_model_path if tokenizer_path is None else tokenizer_path,
@@ -205,13 +205,13 @@ def main():
 
     model = AutoModelForCausalLM.from_pretrained(
         base_model_path,
-        device_map={"": 0},
+        device_map="auto",
         trust_remote_code=True,
         torch_dtype=dtype,
     )
 
     if adapter_model_path is not None:
-        model = PeftModel.from_pretrained(model, adapter_model_path, torch_dtype=dtype, device_map={"": 0})
+        model = PeftModel.from_pretrained(model, adapter_model_path, torch_dtype=dtype, device_map="auto")
 
     model.eval()
 
@@ -222,7 +222,7 @@ def main():
     else:
         dataset_to_accuracy = {}
 
-    for dataset_name in datasets:
+    for dataset_name in DATASETS:
         if dataset_name in dataset_to_accuracy:
             continue
         print(f"*** Evaluation on {dataset_name} ***")
@@ -231,7 +231,7 @@ def main():
         dataset_to_accuracy[dataset_name] = accuracy
         print(f"{dataset_name} - Accuracy: {accuracy}")
 
-    accuracies = [acc for dataset_name, acc in dataset_to_accuracy.items() if dataset_name in datasets]
+    accuracies = [acc for dataset_name, acc in dataset_to_accuracy.items() if dataset_name in DATASETS]
     average_accuracy = sum(accuracies) / len(accuracies)
     dataset_to_accuracy["average"] = average_accuracy
     with open(result_file_path, "w") as file:

@@ -1,6 +1,5 @@
 import argparse
 import sys
-import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -26,7 +25,7 @@ def main():
 
     base_model = AutoModelForCausalLM.from_pretrained(
         base_model_path,
-        device_map={"": 0},
+        device_map="auto",
         trust_remote_code=True,
         torch_dtype=dtype,
     )
@@ -34,7 +33,7 @@ def main():
         base_model,
         adapter_model_path,
         torch_dtype=dtype,
-        device_map={"": 0}
+        device_map="auto"
     )
     model.eval()
 
@@ -59,7 +58,7 @@ def main():
         if non_quant_base_model_path is not None:
             non_quant_model = AutoModelForCausalLM.from_pretrained(
                 non_quant_base_model_path,
-                device_map={"": 0},
+                device_map="auto",
                 trust_remote_code=True,
                 torch_dtype=dtype,
             )

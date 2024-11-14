@@ -31,7 +31,7 @@ def main():
 
     quantized_model = AutoModelForCausalLM.from_pretrained(
         base_model_path,
-        device_map={"": 0},
+        device_map="auto",
         torch_dtype=dtype,
         trust_remote_code=True,
         quantization_config=quantization_config

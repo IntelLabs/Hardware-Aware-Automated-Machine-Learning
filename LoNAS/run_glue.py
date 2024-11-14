@@ -558,7 +558,7 @@ def main():
         model.print_trainable_parameters()
     elif training_args.lora:
         logger.info("Loading LoRA modules...")
-        model = PeftModel.from_pretrained(model, model_args.lora_weights, device_map={"": 0})
+        model = PeftModel.from_pretrained(model, model_args.lora_weights, device_map="auto")
 
     compression_ctrl = None
     if nncf_config is not None:

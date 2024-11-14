@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
 import torch
@@ -197,11 +197,11 @@ class SQFTQuantAwareLinear(QuantLinear):
 
         return result
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
         Merges the adapter weights into the base weight.
 
-        Referenced from:
+        Reference:
         https://github.com/AutoGPTQ/AutoGPTQ/blob/866b4c8c2cbb893f1156cb6c114625bba2e4d7c5/auto_gptq/nn_modules/qlinear/qlinear_cuda_old.py#L135-L140
         """
         base_weight = self.base_weight

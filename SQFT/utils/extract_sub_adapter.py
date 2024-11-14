@@ -2,13 +2,11 @@ import argparse
 import os
 import re
 import sys
-sys.path.append('.')
 
 import torch
+from nncf import NNCFConfig
 from peft.utils import CONFIG_NAME, WEIGHTS_NAME, SAFETENSORS_WEIGHTS_NAME
-from transformers import AutoConfig
 
-from utils.load_nncf_config import load_nncf_config
 
 PATTERN = re.compile(r"[[](.*?)[]]", re.S)
 
@@ -39,22 +37,26 @@ def get_width_for_query_prefix(torch_module_to_width, query_module, length=5):
 
 def main():
     parser = argparse.ArgumentParser()
-
+    parser.add_argument("--adapter_model", required=True, type=str, help="Path to trained adapter")
     parser.add_argument(
-        "--base_model",
+        "--nncf_config",
         required=True,
         type=str,
-        help="Path to trained model or model identifier from huggingface.co/models",
+        help="Path to the NNCF configuration file"
     )
-    parser.add_argument("--adapter_model", required=True, type=str, help="Path to trained adapter")
-    parser.add_argument("--nncf_config", required=True, type=str, help="Path to the NNCF configuration file")
-    parser.add_argument("--search_space", required=True, default=None, type=str, help="Search space for the subnetwork")
     parser.add_argument(
-        "--subnet_version", choices=["maximal", "heuristic", "minimal", "custom"], default="heuristic", type=str,
+        "--subnet_version",
+        choices=["maximal", "heuristic", "minimal", "custom"],
+        default="heuristic", type=str,
         help="Version of the subnetwork to extract"
     )
     parser.add_argument(
-        "--custom_config", default=None, type=str, help="Dictionary with the configuration of the subnetwork"
+        "--custom_config",
+        default=None,
+        nargs='+',
+        type=int,
+        help="Dictionary with the configuration of the subnetwork"
+
     )
     parser.add_argument(
         "--output_dir",
@@ -64,22 +66,15 @@ def main():
     )
 
     args = parser.parse_args()
-    base_model_path = args.base_model
     adapter_model_path = args.adapter_model
     nncf_config = args.nncf_config
-    search_space = args.search_space
     subnet_version = args.subnet_version
     custom_config = args.custom_config
     output_dir = args.output_dir
     os.makedirs(output_dir, exist_ok=True)
 
     # Load search space (currently consider `width` only)
-    model_config = AutoConfig.from_pretrained(base_model_path, trust_remote_code=True)
-    nncf_config = load_nncf_config(
-        nncf_config,
-        num_hidden_layers=model_config.num_hidden_layers,
-        search_space=search_space,
-    )
+    nncf_config = NNCFConfig.from_json(nncf_config)
     try:
         overwrite_groups = nncf_config["bootstrapNAS"]["training"]["elasticity"]["width"]["overwrite_groups"]
         overwrite_groups_widths = nncf_config["bootstrapNAS"]["training"]["elasticity"]["width"][
@@ -97,9 +92,8 @@ def main():
         subnetwork_config = {idx: space[-1] for idx, space in enumerate(overwrite_groups_widths)}
     else:
         assert custom_config is not None, "Missing custom subnetwork config."
-        from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import ElasticityDim
-
-        subnetwork_config = torch.load(custom_config)["subnet_config"][ElasticityDim.WIDTH]
+        assert isinstance(custom_config, list), "Custom config must be a list."
+        subnetwork_config = {i: value for i, value in enumerate(custom_config)}
 
     # Mapping: nncf node -> width
     nncf_node_to_width = {}

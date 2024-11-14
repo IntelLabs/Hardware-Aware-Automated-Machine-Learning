@@ -106,15 +106,11 @@ def check_sparsity(model):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_path", type=str, help="Path to the model.")
+    parser.add_argument("--model_path", type=str, help="The model needs to be checked for sparsity")
     args = parser.parse_args()
     model_path = args.model_path
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        trust_remote_code=True,
-    ).eval()
-
+    model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True).eval()
     print(f"Sparsity: {check_sparsity(model)}")
 
 
