@@ -1,7 +1,6 @@
 import argparse
 import os
 import re
-import sys
 
 import torch
 from nncf import NNCFConfig
@@ -55,8 +54,7 @@ def main():
         default=None,
         nargs='+',
         type=int,
-        help="Dictionary with the configuration of the subnetwork"
-
+        help="Dictionary with the configuration of the sub-adapter"
     )
     parser.add_argument(
         "--output_dir",
