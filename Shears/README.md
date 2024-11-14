@@ -234,12 +234,23 @@ We released some examples of the extracted heuristic sub-adapters. Refer to them
 ## Citation
 If you find our Shears code and paper helpful, please kindly cite:
 ```bibtex
-@article{munoz2024shears,
-  title = {Shears: Unstructured Sparsity with Neural Low-rank Adapter Search},
-  author = {J. Pablo Munoz and Jinjie Yuan and Nilesh Jain},
-  journal = {The 2024 Annual Conference of the North American Chapter of the Association for Computational Linguistics (NAACL-2024)},
-  year = {2024},
-  url = {https://arxiv.org/abs/2404.10934}
+@inproceedings{munoz-etal-2024-shears,
+    title = "Shears: Unstructured Sparsity with Neural Low-rank Adapter Search",
+    author = "Mu{\~n}oz, J. Pablo  and
+      Yuan, Jinjie  and
+      Jain, Nilesh",
+    editor = "Yang, Yi  and
+      Davani, Aida  and
+      Sil, Avi  and
+      Kumar, Anoop",
+    booktitle = "Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 6: Industry Track)",
+    month = jun,
+    year = "2024",
+    address = "Mexico City, Mexico",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2024.naacl-industry.34",
+    doi = "10.18653/v1/2024.naacl-industry.34",
+    pages = "395--405",
 }
 ```
 

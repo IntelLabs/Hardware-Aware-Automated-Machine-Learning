@@ -244,7 +244,7 @@ def main():
         model_args.model_name_or_path,
         load_in_8bit=False,
         torch_dtype=torch.float16,
-        device_map={"": 0},
+        device_map="auto",
         trust_remote_code=True,
         cache_dir=model_args.cache_dir,
     )
@@ -263,7 +263,7 @@ def main():
         model.print_trainable_parameters()
     elif training_args.lora:
         logger.info("Loading LoRA modules...")
-        model = PeftModel.from_pretrained(model, model_args.lora_weights, torch_dtype=torch.float16, device_map={"": 0})
+        model = PeftModel.from_pretrained(model, model_args.lora_weights, torch_dtype=torch.float16, device_map="auto")
 
     nncf_config = None
     if training_args.nncf_config is not None:

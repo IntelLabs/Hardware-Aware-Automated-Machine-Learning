@@ -1,0 +1,58 @@
+diff --git a/lib/data.py b/lib/data.py
+index b6842c4..ce2b55c 100644
+--- a/lib/data.py
++++ b/lib/data.py
+@@ -40,8 +40,8 @@ def get_wikitext2(nsamples, seed, seqlen, tokenizer):
+ # Load and process c4 dataset
+ def get_c4(nsamples, seed, seqlen, tokenizer):
+     # Load train and validation datasets
+-    traindata = load_dataset('allenai/c4', 'allenai--c4', data_files={'train': 'en/c4-train.00000-of-01024.json.gz'}, split='train')
+-    valdata = load_dataset('allenai/c4', 'allenai--c4', data_files={'validation': 'en/c4-validation.00000-of-00008.json.gz'}, split='validation')
++    traindata = load_dataset('allenai/c4', data_files={'train': 'en/c4-train.00000-of-01024.json.gz'}, split='train')
++    valdata = load_dataset('allenai/c4', data_files={'validation': 'en/c4-validation.00000-of-00008.json.gz'}, split='validation')
+ 
+     # Generate samples from training set
+     random.seed(seed)
+diff --git a/lib/prune.py b/lib/prune.py
+index 01d981c..b772908 100644
+--- a/lib/prune.py
++++ b/lib/prune.py
+@@ -141,7 +141,11 @@ def prune_wanda(args, model, tokenizer, device=torch.device("cuda:0"), prune_n=0
+ 
+         if f"model.layers.{i}" in model.hf_device_map:   ## handle the case for llama-30B and llama-65B, when the device map has multiple GPUs;
+             dev = model.hf_device_map[f"model.layers.{i}"]
+-            inps, outs, attention_mask, position_ids = inps.to(dev), outs.to(dev), attention_mask.to(dev), position_ids.to(dev)
++            inps, outs = inps.to(dev), outs.to(dev)
++            if attention_mask is not None:
++                attention_mask = attention_mask.to(dev)
++            if position_ids is not None:
++                position_ids = position_ids.to(dev)
+ 
+         wrapped_layers = {}
+         for name in subset:
+diff --git a/main.py b/main.py
+index a94583c..2d5cbec 100644
+--- a/main.py
++++ b/main.py
+@@ -22,7 +22,20 @@ def get_llm(model_name, cache_dir="llm_weights"):
+         device_map="auto"
+     )
+ 
+-    model.seqlen = model.config.max_position_embeddings 
++    if not hasattr(model.config, 'max_position_embeddings'):
++        raise AttributeError(
++            "model.config does not have `max_position_embeddings`, please check the attribute name for the maximum length. "
++            "You may need to modify the code accordingly."
++        )
++    else:
++        if model.config.max_position_embeddings > 8192:
++            # such as mistralai/Mistral-7B-v0.3 ("max_position_embeddings": 32768)
++            model.seqlen = 8192
++            print(
++                "The maximum length supported by this model is large, setting the maximum length for calibration samples to 8192."
++            )
++        else:
++            model.seqlen = model.config.max_position_embeddings
+     return model
+ 
+ def main():

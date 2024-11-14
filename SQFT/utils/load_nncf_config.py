@@ -1,49 +1,53 @@
 """
-Some NNCF config preprocessing code for Shears.
+Some NNCF config preprocessing code.
 
 This module provides preprocessing functionality for NNCF (Neural Network Compression Framework) configuration files
-used in Shears. It includes utility functions for handling JSON files and preprocessing NNCF configurations.
+used. It includes utility functions for handling JSON files and preprocessing NNCF configurations.
 """
+import os
 import json
-from pathlib import Path
 from nncf import NNCFConfig
-from nncf.common.utils.os import safe_open
 
-def parse_nncf_config(nncf_config_path, num_hidden_layers=1, search_space=None):
-    """Parse and preprocess the NNCF configuration file.
 
-    Args:
-        nncf_config_path (str): Path to the NNCF configuration file.
-        num_hidden_layers (int): Number of hidden layers to consider for the search space.
-        search_space (list, optional): List of search space widths. Defaults to None.
+NNCF_CONFIG_TEMPLATE = {
+    "input_info": [
+        {
+            "sample_size": [1, 256],
+            "type": "long",
+            "keyword": "input_ids"
+        },
+        {
+            "sample_size": [1, 256],
+            "type": "long",
+            "keyword": "attention_mask"
+        }
+    ],
+    "bootstrapNAS": {
+        "training": {
+            "algorithm": "progressive_shrinking",
+            "frozen_layers_allowed": True,
+            "progressivity_of_elasticity": ["width"],
+            "batchnorm_adaptation": {
+                "num_bn_adaptation_samples": 0
+            },
+            "schedule": {
+                "list_stage_descriptions": [
+                    {"train_dims": ["width"], "epochs": -1, "depth_indicator": 1, "width_indicator": 8, "init_lr": -1, "epochs_lr": -1, "sample_rate": 1}
+                ]
+            },
+            "elasticity": {
+                "available_elasticity_dims": ["width"],
+                "width": {
+                    "overwrite_groups": [],
+                    "overwrite_groups_widths": []
+                }
+            }
+        }
+    }
+}
 
-    Returns:
-        dict: The preprocessed NNCF configuration.
-    """
-    with safe_open(Path(nncf_config_path)) as file:
-        loaded_json = json.load(file)
 
-    base_overwrite_groups = loaded_json["bootstrapNAS"]["training"]["elasticity"]["width"]["overwrite_groups"]
-    base_overwrite_groups_widths = loaded_json["bootstrapNAS"]["training"]["elasticity"]["width"][
-        "overwrite_groups_widths"]
-    overwrite_groups, overwrite_groups_widths = [], []
-    for group, width in zip(base_overwrite_groups, base_overwrite_groups_widths):
-        current_search_space = width if search_space is None else search_space
-        if group[0].startswith("{re}"):
-            new_group = [[item.replace("{re}", "").replace("{*}", str(i)) for item in group] for i in range(num_hidden_layers)]
-            new_width = [current_search_space for _ in range(num_hidden_layers)]
-        else:
-            new_group = [group]
-            new_width = [current_search_space]
-        overwrite_groups.extend(new_group)
-        overwrite_groups_widths.extend(new_width)
-
-    loaded_json["bootstrapNAS"]["training"]["elasticity"]["width"]["overwrite_groups"] = overwrite_groups
-    loaded_json["bootstrapNAS"]["training"]["elasticity"]["width"][
-        "overwrite_groups_widths"] = overwrite_groups_widths
-    return loaded_json
-
-def add_lr_epochs(nncf_config, learning_rate=3e-4, num_epochs=3):
+def add_lr_epochs(nncf_config, learning_rate=3e-4, num_train_epochs=3):
     """Add learning rate and epochs to the NNCF configuration.
 
     Args:
@@ -58,27 +62,90 @@ def add_lr_epochs(nncf_config, learning_rate=3e-4, num_epochs=3):
     if stage_description["init_lr"] == -1:
         stage_description["init_lr"] = learning_rate
     if stage_description["epochs"] == -1:
-        stage_description["epochs"] = num_epochs
-        stage_description["epochs_lr"] = num_epochs
+        stage_description["epochs"] = num_train_epochs
+        stage_description["epochs_lr"] = num_train_epochs
 
     return nncf_config
 
-def load_nncf_config(nncf_config_path, learning_rate=3e-4, num_epochs=3, num_hidden_layers=32, search_space=None):
-    """Load and preprocess the NNCF configuration file.
+
+def get_model_paths(model, target_module_name):
+    """
+    Find all paths to the target layer in the model.
 
     Args:
-        nncf_config_path (str): Path to the NNCF configuration file.
-        learning_rate (float): The initial learning rate to set.
-        num_epochs (int): The number of epochs to set.
-        num_hidden_layers (int): Number of hidden layers to consider for the search space.
-        search_space (str, optional): Comma-separated string of search space widths. Defaults to None.
+        model (torch.nn.Module): The model to search.
+        target_module_name (str): The name of the target layer.
+
+    Returns:
+        list: A list of paths to the target layer.
+    """
+    def find_layers(module, target_module_name, path, paths):
+        for name, sub_module in module.named_children():
+            new_path = f"{path}/{sub_module.__class__.__name__}[{name}]"
+            if target_module_name in name:
+                # Check if 'lora_A' is in the sub_module's children
+                for sub_name, _ in sub_module.named_children():
+                    if "lora_A" in sub_name:
+                        paths.append(f"{new_path}/ModuleDict[lora_A]/NNCFLinear[default]/linear_0")
+            find_layers(sub_module, target_module_name, new_path, paths)
+
+    base_path = model.__class__.__name__
+    paths = []
+    find_layers(model, target_module_name, base_path, paths)
+    return paths
+
+
+def load_nncf_config(
+    model,
+    output_dir,
+    num_train_epochs=3,
+    learning_rate=3e-4,
+    target_module_groups=None,
+    search_space=None,
+    nncf_config=None
+):
+    """Load and preprocess the NNCF configuration file.
 
     Returns:
         NNCFConfig: The preprocessed NNCF configuration object.
     """
-    if search_space is not None:
-        search_space = [int(width) for width in search_space.split(",")]
-    loaded_json = parse_nncf_config(nncf_config_path, num_hidden_layers=num_hidden_layers, search_space=search_space)
-    loaded_json = add_lr_epochs(loaded_json, learning_rate=learning_rate, num_epochs=num_epochs)
-    nncf_config = NNCFConfig.from_dict(loaded_json)
+
+    if nncf_config is not None:
+        nncf_config = NNCFConfig.from_json(nncf_config)
+    else:
+        if search_space is None and target_module_groups:
+            raise ValueError("Neural LoRA search is enabled, `search_space` and `target_module_groups` must be provided.")
+        # The NNCF Config will be automatically generated based on `target_module_groups` and `search_space`.
+        num_hidden_layers = model.config.num_hidden_layers
+        nncf_config_dict = NNCF_CONFIG_TEMPLATE
+        overwrite_groups = []
+        for group in target_module_groups:
+            group_paths = []
+            for module in group:
+                target_layer_name = module
+                paths = get_model_paths(model, target_layer_name)
+                assert paths, f"No paths found for module {module}"
+                group_paths.append(paths)
+            # Transpose the list of lists to combine paths by their positions
+            transposed_paths = list(zip(*group_paths))
+            overwrite_groups.extend([list(path_group) for path_group in transposed_paths])
+        nncf_config_dict["bootstrapNAS"]["training"]["elasticity"]["width"]["overwrite_groups"] = overwrite_groups
+
+        overwrite_groups_widths = []
+        for space in search_space:
+            space = [int(width) for width in space.split(",")]
+            overwrite_groups_widths.extend([space] * num_hidden_layers)
+        nncf_config_dict["bootstrapNAS"]["training"]["elasticity"]["width"]["overwrite_groups_widths"] = overwrite_groups_widths
+        assert len(overwrite_groups) == len(overwrite_groups_widths)
+        nncf_config_dict = add_lr_epochs(
+            nncf_config_dict,
+            learning_rate=learning_rate,
+            num_train_epochs=num_train_epochs
+        )
+        nncf_config = NNCFConfig.from_dict(nncf_config_dict)
+
+    nncf_config["log_dir"] = output_dir
+    os.makedirs(nncf_config["log_dir"], exist_ok=True)
+    with open(os.path.join(nncf_config["log_dir"], "nncf_config.json"), "w") as f:
+        json.dump(nncf_config, f, indent=4)
     return nncf_config

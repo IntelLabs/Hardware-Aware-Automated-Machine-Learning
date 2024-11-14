@@ -28,10 +28,10 @@ def main():
     base_model = AutoModelForCausalLM.from_pretrained(
         base_model_path,
         torch_dtype=torch.float16,
-        device_map={"": 0},
+        device_map="auto",
         trust_remote_code=True
     )
-    model = PeftModel.from_pretrained(base_model, adapter_model_path, torch_dtype=torch.float16, device_map={"": 0})
+    model = PeftModel.from_pretrained(base_model, adapter_model_path, torch_dtype=torch.float16, device_map="auto")
     model.eval()
     tokenizer = AutoTokenizer.from_pretrained(base_model_path)
 

@@ -170,13 +170,25 @@ Please refer to `running_commands` for all commands related to reproducing the p
 # Citation
 
 ```bibtex
-@inproceedings{
-munoz2024lonas,
-title={LoNAS: Elastic Low-Rank Adapters for Efficient Large Language Models},
-author={J. Pablo Muñoz and Jinjie Yuan and Yi Zheng and Nilesh Jain},
-booktitle={The 2024 Joint International Conference on Computational Linguistics, Language Resources and Evaluation},
-year={2024},
-url={https://aclanthology.org/2024.lrec-main.940/}
+@inproceedings{munoz-etal-2024-lonas,
+    title = "{L}o{NAS}: Elastic Low-Rank Adapters for Efficient Large Language Models",
+    author = "Munoz, Juan Pablo  and
+      Yuan, Jinjie  and
+      Zheng, Yi  and
+      Jain, Nilesh",
+    editor = "Calzolari, Nicoletta  and
+      Kan, Min-Yen  and
+      Hoste, Veronique  and
+      Lenci, Alessandro  and
+      Sakti, Sakriani  and
+      Xue, Nianwen",
+    booktitle = "Proceedings of the 2024 Joint International Conference on Computational Linguistics, Language Resources and Evaluation (LREC-COLING 2024)",
+    month = may,
+    year = "2024",
+    address = "Torino, Italia",
+    publisher = "ELRA and ICCL",
+    url = "https://aclanthology.org/2024.lrec-main.940",
+    pages = "10760--10776",
 }
 ```
 

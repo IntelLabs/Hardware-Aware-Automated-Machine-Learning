@@ -5,12 +5,12 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional
 
 import datasets
 import torch
 import transformers
-from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -44,17 +44,33 @@ class SQFTTrainingArguments(TrainingArguments):
     lora_r: int = field(default=32, metadata={"help": "Lora R dimension."})
     lora_alpha: float = field(default=64, metadata={"help": "Lora alpha."})
     lora_dropout: float = field(default=0.0, metadata={"help": "Lora dropout."})
-    target_modules: str = field(
-        default="q_proj,v_proj", metadata={"help": "The layers where LoRA adapters will be placed."}
+    target_modules: List[str] = field(
+        default=None, metadata={"help": "Which module will be added the lora adapter."}
     )
-    lora: bool = field(default=False, metadata={"help": "Whether to apply LoRA or not."})
+    nls: bool = field(default=False, metadata={"help": "Whether to apply Neural LoRA Search (NLS) or not."})
+    target_module_groups: List[str] = field(
+        default=None, metadata={"help": "Grouped modules for more fine-grained control, e.g., 'q_proj,v_proj up_proj'"}
+    )
+    search_space: List[str] = field(default=None, metadata={"help": "Low-rank search space of NLS training."})
     nncf_config: str = field(
         default=None, metadata={"help": "NNCF configuration .json file for compression-enabled training"}
     )
-    search_space: str = field(default=None, metadata={"help": "Low-rank search space of NLS training."})
-    padding_size: str = field(default="right", metadata={"help": "Padding size for tokenization."})
     sparse_adapter: bool = field(default=False, metadata={"help": "Enable SparsePEFT."})
     quantization_aware: bool = field(default=False, metadata={"help": "Enable quantization-aware SparsePEFT."})
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.target_module_groups is not None:
+            target_modules = []
+            target_module_groups = []
+            for group in self.target_module_groups:
+                modules = group.split(",")
+                target_modules.extend(modules)
+                target_module_groups.append(modules)
+            if self.target_modules is None:
+                self.target_modules = target_modules
+            self.target_module_groups = target_module_groups
+            assert self.search_space is not None and len(self.search_space) == len(self.target_module_groups)
 
 
 @dataclass
@@ -122,59 +138,48 @@ def main():
     # Load model
     model = AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
-        device_map={"": 0},
+        device_map="auto",
         trust_remote_code=True,
         torch_dtype=model_args.dtype,
     )
     model.gradient_checkpointing_enable()
     model = prepare_model_for_kbit_training(model)
 
-    if training_args.lora and model_args.lora_weights is None:
-        logger.info("Adding LoRA modules...")
-        lora_config = LoraConfig(
-            r=training_args.lora_r,
-            lora_alpha=training_args.lora_alpha,
-            lora_dropout=training_args.lora_dropout,
-            target_modules=training_args.target_modules.split(","),
-            bias="none",
-            task_type="CAUSAL_LM",
-            sparse_adapter=training_args.sparse_adapter,
-            quantization_aware=training_args.quantization_aware,
-        )
-        model = get_peft_model(model, lora_config)
-        model.print_trainable_parameters()
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                param.data = param.data.to(torch.float32)
-    elif training_args.lora:
-        logger.info("Loading LoRA modules...")
-        model = PeftModel.from_pretrained(model, model_args.lora_weights, torch_dtype=model_args.dtype, device_map={"": 0})
+    logger.info("Adding LoRA modules...")
+    lora_config = LoraConfig(
+        r=training_args.lora_r,
+        lora_alpha=training_args.lora_alpha,
+        lora_dropout=training_args.lora_dropout,
+        target_modules=training_args.target_modules,
+        bias="none",
+        task_type="CAUSAL_LM",
+        sparse_adapter=training_args.sparse_adapter,
+        quantization_aware=training_args.quantization_aware,
+    )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            param.data = param.data.to(torch.float32)
 
     nncf_config = None
     compression_ctrl = None
-    if training_args.nncf_config is not None:
+    if training_args.nls:
         if not is_nncf_available:
             raise ImportError("NNCF is not installed. Please install it.")
         nncf_config = load_nncf_config(
-            training_args.nncf_config,
+            model,
+            output_dir=training_args.output_dir,
+            num_train_epochs=training_args.num_train_epochs,
             learning_rate=training_args.learning_rate,
-            num_epochs=training_args.num_train_epochs,
-            num_hidden_layers=model.config.num_hidden_layers,
+            target_module_groups=training_args.target_module_groups,
             search_space=training_args.search_space,
         )
 
-        if nncf_config.get("log_dir") is None:
-            nncf_config["log_dir"] = training_args.output_dir
-
-        if not os.path.exists(training_args.output_dir) and training_args.local_rank in [-1, 0]:
-            os.makedirs(nncf_config["log_dir"])
-
-        if nncf_config is not None:
-            nncf_network = create_nncf_network(model, nncf_config)
-            algo_name = nncf_config.get("bootstrapNAS", {}).get("training", {}).get("algorithm", "progressive_shrinking")
-            compression_ctrl, model = create_compressed_model_from_algo_names(
-                nncf_network, nncf_config, algo_names=[algo_name]
-            )
+        nncf_network = create_nncf_network(model, nncf_config)
+        compression_ctrl, model = create_compressed_model_from_algo_names(
+            nncf_network, nncf_config, algo_names=["progressive_shrinking"]
+        )
 
     # Init SQFTQuantAwareLinear params
     if training_args.quantization_aware:
@@ -198,7 +203,7 @@ def main():
         if model_args.non_quant_model_name_or_path is not None:
             non_quant_model = AutoModelForCausalLM.from_pretrained(
                 model_args.non_quant_model_name_or_path,
-                device_map={"": 0},
+                device_map="auto",
                 trust_remote_code=True,
                 torch_dtype=model_args.dtype,
             )
@@ -220,7 +225,7 @@ def main():
         trust_remote_code=True
     )
     tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = training_args.padding_size
+    tokenizer.padding_side = "right"
 
     # Load data
     def tokenize(prompt, add_eos_token=True):
@@ -284,10 +289,9 @@ def main():
         compression_ctrl=compression_ctrl,
     )
 
-    if nncf_config is not None:
+    if compression_ctrl is not None:
         if not (training_args.local_rank in [-1, 0] or training_args.no_cuda):
             compression_ctrl.distributed()
-
     model.config.use_cache = False
 
     # Training
@@ -300,13 +304,6 @@ def main():
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()
-
-
-def _mp_fn(index):
-    """
-    Function for xla_spawn (TPUs).
-    """
-    main()
 
 
 if __name__ == "__main__":
