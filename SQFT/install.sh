@@ -9,11 +9,11 @@ mkdir third_party && cd third_party
 
 # transformers
 git clone https://github.com/huggingface/transformers.git
-cd transformers && git checkout v4.44.2 && git apply --ignore-space-change --ignore-whitespace ${SQFT_PATH}/patches/transformers-modifications-for-sqft-usage.patch && pip install -e . && cd ..
+cd transformers && git checkout v4.44.2 && git apply --ignore-space-change --ignore-whitespace ${SQFT_PATH}/patches/transformers-v4.44.2.patch && pip install -e . && cd ..
 
 # peft
 git clone https://github.com/huggingface/peft.git
-cd peft && git checkout v0.10.0 && git apply --ignore-space-change --ignore-whitespace ${SQFT_PATH}/patches/peft-modifications-for-sqft-usage.patch && pip install -e . && cd ..
+cd peft && git checkout v0.10.0 && git apply --ignore-space-change --ignore-whitespace ${SQFT_PATH}/patches/peft-v0.10.0.patch && pip install -e . && cd ..
 
 pip install datasets accelerate sentencepiece protobuf
 pip install optimum==1.18.0 --no-deps
