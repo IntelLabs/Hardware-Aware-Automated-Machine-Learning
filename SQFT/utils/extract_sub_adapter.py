@@ -74,10 +74,8 @@ def main():
     # Load search space (currently consider `width` only)
     nncf_config = NNCFConfig.from_json(nncf_config)
     try:
-        overwrite_groups = nncf_config["bootstrapNAS"]["training"]["elasticity"]["width"]["overwrite_groups"]
-        overwrite_groups_widths = nncf_config["bootstrapNAS"]["training"]["elasticity"]["width"][
-            "overwrite_groups_widths"
-        ]
+        overwrite_groups = nncf_config["SQFT"]["training"]["elasticity"]["width"]["overwrite_groups"]
+        overwrite_groups_widths = nncf_config["SQFT"]["training"]["elasticity"]["width"]["overwrite_groups_widths"]
         assert len(overwrite_groups) == len(overwrite_groups_widths)
     except Exception:
         raise ValueError("Cannot get the search space in NNCF config.")

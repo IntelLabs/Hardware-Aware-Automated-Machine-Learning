@@ -1,0 +1,469 @@
+diff --git a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elasticity_builder.py b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elasticity_builder.py
+index bc6464b24..7a544326e 100644
+--- a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elasticity_builder.py
++++ b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elasticity_builder.py
+@@ -82,7 +82,12 @@ class ElasticityBuilder(PTCompressionAlgorithmBuilder):
+         return self._available_elasticity_dims
+ 
+     def _get_algo_specific_config_section(self) -> Dict:
+-        return self.config.get("bootstrapNAS", {}).get("training", {}).get("elasticity", {})
++        algorithm_names = ["bootstrapNAS", "SQFT"]
++        for algorithm in algorithm_names:
++            elasticity = self.config.get(algorithm, {}).get("training", {}).get("elasticity", {})
++            if elasticity:
++                return elasticity
++        return {}
+ 
+     def _build_controller(self, model: NNCFNetwork) -> "ElasticityController":
+         """
+@@ -152,3 +157,17 @@ class ElasticityBuilder(PTCompressionAlgorithmBuilder):
+ 
+         # No conflict resolving with the related config options, parameters are overridden by compression state
+         self._available_elasticity_dims = list(map(ElasticityDim, available_elasticity_dims_state))
++
++    def _are_frozen_layers_allowed(self):
++        """
++        Determine if frozen layers are permissible based on the algorithm.
++        Frozen layers are allowed when using the Neural LoRA Search algorithm in SQFT.
++        :return: A tuple where the first element is a boolean indicating whether frozen layers are allowed,
++                 and the second element is a string message providing the rationale.
++        """
++        frozen_layers_allowed = (
++            self.config.get("SQFT", {}).get("training", {}).get("algorithm") == "nls"
++        )
++        if frozen_layers_allowed:
++            return True, "Frozen layers are allowed under the `Neural LoRA Search` algorithm"
++        return super()._are_frozen_layers_allowed()
+diff --git a/nncf/experimental/torch/sqft/__init__.py b/nncf/experimental/torch/sqft/__init__.py
+new file mode 100644
+index 000000000..06f5e9548
+--- /dev/null
++++ b/nncf/experimental/torch/sqft/__init__.py
+@@ -0,0 +1,13 @@
++# Copyright (c) 2024 Intel Corporation
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#      http://www.apache.org/licenses/LICENSE-2.0
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++# noqa
++from nncf.experimental.torch.sqft.training import nls_builder as nls_algo
+diff --git a/nncf/experimental/torch/sqft/training/__init__.py b/nncf/experimental/torch/sqft/training/__init__.py
+new file mode 100644
+index 000000000..2e49d6397
+--- /dev/null
++++ b/nncf/experimental/torch/sqft/training/__init__.py
+@@ -0,0 +1,10 @@
++# Copyright (c) 2024 Intel Corporation
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#      http://www.apache.org/licenses/LICENSE-2.0
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
+diff --git a/nncf/experimental/torch/sqft/training/nls_builder.py b/nncf/experimental/torch/sqft/training/nls_builder.py
+new file mode 100644
+index 000000000..a821f28e8
+--- /dev/null
++++ b/nncf/experimental/torch/sqft/training/nls_builder.py
+@@ -0,0 +1,96 @@
++# Copyright (c) 2024 Intel Corporation
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#      http://www.apache.org/licenses/LICENSE-2.0
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++from typing import Any, Dict, Tuple
++
++from nncf import NNCFConfig
++from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_builder import ElasticityBuilder
++from nncf.experimental.torch.sqft.training.scheduler import NLSSchedulerParams
++from nncf.experimental.torch.sqft.training.nls_controller import NeuralLoraSearchController
++from nncf.torch.algo_selector import PT_COMPRESSION_ALGORITHMS
++from nncf.torch.algo_selector import ZeroCompressionLoss
++from nncf.torch.compression_method_api import PTCompressionAlgorithmBuilder
++from nncf.torch.graph.transformations.layout import PTTransformationLayout
++from nncf.torch.nncf_network import NNCFNetwork
++
++
++class NLSBuilderStateNames:
++    ELASTICITY_BUILDER_STATE = "elasticity_builder_state"
++
++
++@PT_COMPRESSION_ALGORITHMS.register("nls")
++class NeuralLoraSearchBuilder(PTCompressionAlgorithmBuilder):
++    """
++    Determines which modifications should be made to the original FP32 model in
++    order to train a supernet using Progressive Shrinking procedure from OFA (https://arxiv.org/abs/1908.09791).
++    Operates on an NNCFNetwork object wrapping a target PyTorch model (torch.nn.Module).
++    """
++
++    _state_names = NLSBuilderStateNames
++
++    def __init__(self, nncf_config: NNCFConfig, should_init: bool = True):
++        super().__init__(nncf_config, should_init)
++        self._elasticity_builder = ElasticityBuilder(self.config, self.should_init)
++        self._lr_schedule_config = self._algo_config.get("lr_schedule", {})
++
++    def initialize(self, model: NNCFNetwork) -> None:
++        """
++        Initialize model parameters before training
++
++        :param model: The model with additional modifications necessary to enable
++            algorithm-specific compression during fine-tuning.
++        """
++
++    def _get_algo_specific_config_section(self) -> Dict:
++        return self.config.get("SQFT", {}).get("training", {})
++
++    def _build_controller(self, model: NNCFNetwork) -> "NeuralLoraSearchController":
++        elasticity_ctrl = self._elasticity_builder.build_controller(model)
++        schedule_params = NLSSchedulerParams.from_config(self._algo_config.get("schedule", {}))
++        return NeuralLoraSearchController(
++            model,
++            elasticity_ctrl,
++            schedule_params,
++            self._lr_schedule_config,
++            ZeroCompressionLoss,
++        )
++
++    def _get_transformation_layout(self, target_model: NNCFNetwork) -> PTTransformationLayout:
++        return self._elasticity_builder.get_transformation_layout(target_model)
++
++    def _get_state_without_name(self) -> Dict[str, Any]:
++        """
++        Implementation of get_state that returns state without builder name.
++
++        :return: Returns a dictionary with Python data structures
++            (dict, list, tuple, str, int, float, True, False, None) that represents state of the object.
++        """
++        return {
++            self._state_names.ELASTICITY_BUILDER_STATE: self._elasticity_builder.get_state(),
++        }
++
++    def _load_state_without_name(self, state_without_name: Dict[str, Any]):
++        """
++        Implementation of load state that takes state without builder name.
++
++        :param state_without_name: Output of `_get_state_without_name()` method.
++        """
++        elasticity_builder_state = state_without_name[self._state_names.ELASTICITY_BUILDER_STATE]
++        self._elasticity_builder.load_state(elasticity_builder_state)
++
++    def _are_frozen_layers_allowed(self) -> Tuple[bool, str]:
++        """
++        Frozen layers will be allowed in Neural Lora Search algorithm.
++        It freezes the pretrained weights while training the LoRA Super-Adapter.
++
++        :return: A tuple where the first element is a boolean indicating if frozen layers are allowed,
++                 and the second element is a string message explaining the reason.
++        """
++        return True, "Frozen layers are allowed under the `Neural Lora Search` algorithm"
+diff --git a/nncf/experimental/torch/sqft/training/nls_controller.py b/nncf/experimental/torch/sqft/training/nls_controller.py
+new file mode 100644
+index 000000000..ee3766a52
+--- /dev/null
++++ b/nncf/experimental/torch/sqft/training/nls_controller.py
+@@ -0,0 +1,222 @@
++# Copyright (c) 2024 Intel Corporation
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#      http://www.apache.org/licenses/LICENSE-2.0
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++from typing import Any, Callable, Dict, NoReturn
++
++from nncf.api.compression import CompressionLoss
++from nncf.api.compression import CompressionScheduler
++from nncf.api.compression import CompressionStage
++from nncf.common.logging import nncf_logger
++from nncf.common.statistics import NNCFStatistics
++from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_controller import ElasticityController
++from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import ElasticityDim
++from nncf.experimental.torch.nas.bootstrapNAS.elasticity.multi_elasticity_handler import MultiElasticityHandler
++from nncf.experimental.torch.nas.bootstrapNAS.training.base_training import BNASTrainingController
++from nncf.experimental.torch.nas.bootstrapNAS.training.lr_scheduler import GlobalLRScheduler
++from nncf.experimental.torch.nas.bootstrapNAS.training.lr_scheduler import StageLRScheduler
++from nncf.experimental.torch.nas.bootstrapNAS.training.scheduler import BootstrapNASScheduler
++from nncf.experimental.torch.nas.bootstrapNAS.training.stage_descriptor import StageDescriptor
++from nncf.experimental.torch.sqft.training.scheduler import NLSSchedulerParams
++from nncf.torch.nncf_network import NNCFNetwork
++
++
++class NLSControllerStateNames:
++    ELASTICITY_CONTROLLER_STATE = "elasticity_controller_compression_state"
++    LR_GLOBAL_SCHEDULE_STATE = "learning_rate_global_schedule_state"
++
++
++class NeuralLoraSearchController(BNASTrainingController):
++    """
++    Serves as a handle to the additional modules, parameters and hooks inserted into the original
++    uncompressed model in order to train a supernet (super-adapter) using Neural Lora Search
++    (https://arxiv.org/pdf/2404.10934, https://arxiv.org/abs/2410.03750).
++    Hosts entities that are to be used during the training process, such as compression scheduler.
++    """
++
++    _ps_state_names = NLSControllerStateNames
++
++    def __init__(
++        self,
++        target_model: NNCFNetwork,
++        elasticity_ctrl: ElasticityController,
++        schedule_params: NLSSchedulerParams,
++        lr_schedule_config: Dict[str, Any],
++        compression_loss_func: Callable,
++    ):
++        super().__init__(target_model)
++        self._elasticity_ctrl = elasticity_ctrl
++        self._target_model = target_model
++        self._loss = compression_loss_func
++        self._supported_elasticity_dims = [ElasticityDim.WIDTH]
++        self._available_elasticity_dims = self.multi_elasticity_handler.get_available_elasticity_dims()
++        # Neural Lora Search aims to provide elasticity to the LoRA rank, hence only `Width` is supported here.
++        assert self._available_elasticity_dims == self._supported_elasticity_dims
++        self._lr_schedule_config = lr_schedule_config
++        self._scheduler = BootstrapNASScheduler(
++            self, schedule_params, self._available_elasticity_dims, self._supported_elasticity_dims
++        )
++        self._sample_rate = 1
++
++    def set_training_lr_scheduler_args(self, optimizer, train_iters):
++        params = self._lr_schedule_config.get("params", {})
++        num_epochs = params.get("num_epochs", None)
++        base_lr = params.get("base_lr", None)
++
++        if base_lr is not None:
++            nncf_logger.info("Global LR scheduler in use")
++            # Global lr scheduler
++            if num_epochs is None:
++                params["num_epochs"] = self.get_total_num_epochs()
++            lr_scheduler = GlobalLRScheduler(optimizer, train_iters, **params)
++        else:
++            nncf_logger.info("Stage LR scheduler in use")
++            lr_scheduler = StageLRScheduler(optimizer, train_iters)
++        self._scheduler.lr_scheduler = lr_scheduler
++
++    @property
++    def lr_schedule_config(self) -> str:
++        """
++        Gets access to learning rate scheduler configuration.
++
++        :return: learning rate scheduler
++        """
++        return self._lr_schedule_config
++
++    @lr_schedule_config.setter
++    def lr_schedule_config(self, val: Dict[str, Any]) -> NoReturn:
++        self._lr_schedule_config = val
++
++    @property
++    def multi_elasticity_handler(self) -> MultiElasticityHandler:
++        """
++        Gets access to multi elasticity handler to perform some actions with supernet or subnets.
++
++        :return: multi elasticity handler
++        """
++        return self._elasticity_ctrl.multi_elasticity_handler
++
++    @property
++    def elasticity_controller(self) -> ElasticityController:
++        """
++        Gets access to elasticity controller. Usually it's needed for saving its state for further resuming in the
++        search part.
++
++        :return: elasticity controller
++        """
++        return self._elasticity_ctrl
++
++    @property
++    def loss(self) -> CompressionLoss:
++        """
++        :return: The instance of the `CompressionLoss`.
++        """
++        return self._loss
++
++    @property
++    def scheduler(self) -> CompressionScheduler:
++        """
++        :return: The instance of the `CompressionScheduler`.
++        """
++        return self._scheduler
++
++    def step(self) -> None:
++        """
++        Should be called at the beginning of each training step for activation some Subnet(s).
++        """
++        if self._scheduler.current_step % self._sample_rate == 0:
++            self.multi_elasticity_handler.activate_random_subnet()
++            nncf_logger.debug(f"Active config: {self.multi_elasticity_handler.get_active_config()}")
++
++    def prepare_for_validation(self) -> None:
++        """
++        Performs some action on active subnet or supernet before validation. For instance, it can be the batchnorm
++        adaptation to achieve the best accuracy on validation.
++        """
++
++    def get_total_num_epochs(self) -> int:
++        """
++        Returns total number of epochs required for the supernet training.
++
++        :return: number of epochs
++        """
++        return self._scheduler.get_total_training_epochs()
++
++    def set_stage(self, stage_desc: StageDescriptor) -> None:
++        """
++        Set a new training stage with parameters from a given stage descriptor
++
++        :param stage_desc: describes parameters of the training stage that should be enabled
++        """
++        for elasticity_dim in self._available_elasticity_dims:
++            if elasticity_dim in stage_desc.train_dims:
++                self.multi_elasticity_handler.enable_elasticity(elasticity_dim)
++            else:
++                self.multi_elasticity_handler.disable_elasticity(elasticity_dim)
++
++        width_handler = self.multi_elasticity_handler.width_handler
++        depth_handler = self.multi_elasticity_handler.depth_handler
++        if width_handler is not None:
++            if stage_desc.reorg_weights:
++                width_handler.reorganize_weights()
++            width_indicator = stage_desc.width_indicator
++            if width_indicator:
++                width_handler.width_num_params_indicator = width_indicator
++
++        depth_indicator = stage_desc.depth_indicator
++        if depth_handler and depth_indicator:
++            depth_handler.depth_indicator = depth_indicator
++
++        self._sample_rate = stage_desc.sample_rate
++
++    def statistics(self, quickly_collected_only: bool = False) -> NNCFStatistics:
++        """
++        Returns a `Statistics` class instance that contains compression algorithm statistics.
++
++        :param quickly_collected_only: Enables collection of the statistics that
++            don't take too much time to compute. Can be helpful for the case when
++            need to keep track of statistics on each training batch/step/iteration.
++        :return: A `Statistics` class instance that contains compression algorithm statistics.
++        """
++        return NNCFStatistics()
++
++    def compression_stage(self) -> CompressionStage:
++        """
++        Returns the compression stage. Should be used on saving best checkpoints
++        to distinguish between uncompressed, partially compressed, and fully
++        compressed models.
++
++        :return: The compression stage of the target model.
++        """
++        if self._scheduler.is_final_stage():
++            return CompressionStage.FULLY_COMPRESSED
++        return CompressionStage.PARTIALLY_COMPRESSED
++
++    def load_state(self, state: Dict[str, Dict[str, Any]]) -> None:
++        """
++        Loads the compression controller state from the map of algorithm name to the dictionary with state attributes.
++
++        :param state: map of the algorithm name to the dictionary with the corresponding state attributes.
++        """
++        self._lr_schedule_config = state[self._ps_state_names.LR_GLOBAL_SCHEDULE_STATE]
++        super().load_state(state)
++        elasticity_ctrl_state = state[self._ps_state_names.ELASTICITY_CONTROLLER_STATE]
++        self._elasticity_ctrl.load_state(elasticity_ctrl_state)
++
++    def get_state(self) -> Dict[str, Dict[str, Any]]:
++        """
++        Returns compression controller state, which is the map of the algorithm name to the dictionary with the
++        corresponding state attributes.
++
++        :return: The compression controller state.
++        """
++        state = super().get_state()
++        state[self._ps_state_names.ELASTICITY_CONTROLLER_STATE] = self._elasticity_ctrl.get_state()
++        state[self._ps_state_names.LR_GLOBAL_SCHEDULE_STATE] = self._lr_schedule_config
++        return state
+diff --git a/nncf/experimental/torch/sqft/training/scheduler.py b/nncf/experimental/torch/sqft/training/scheduler.py
+new file mode 100644
+index 000000000..647d8ef60
+--- /dev/null
++++ b/nncf/experimental/torch/sqft/training/scheduler.py
+@@ -0,0 +1,34 @@
++# Copyright (c) 2024 Intel Corporation
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#      http://www.apache.org/licenses/LICENSE-2.0
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++from typing import List, Optional
++
++from nncf.experimental.torch.nas.bootstrapNAS.elasticity.elasticity_dim import ElasticityDim
++from nncf.experimental.torch.nas.bootstrapNAS.training.scheduler import NASSchedulerParams
++from nncf.experimental.torch.nas.bootstrapNAS.training.stage_descriptor import StageDescriptor
++
++
++class NSParamsStateNames:
++    LIST_STAGE_DESCRIPTIONS = "list_stage_descriptions"
++
++
++class NLSSchedulerParams(NASSchedulerParams):
++
++    def __init__(self, list_stage_descriptions: Optional[List[StageDescriptor]] = None):
++        """
++        Constructor
++
++        :param list_stage_descriptions: List of parameters per each supernet training stage.
++        """
++        if list_stage_descriptions is None:
++            list_stage_descriptions = [
++                StageDescriptor(train_dims=[ElasticityDim.WIDTH], epochs=1, width_indicator=2)
++            ]
++        self.list_stage_descriptions = list_stage_descriptions
+diff --git a/nncf/torch/layer_utils.py b/nncf/torch/layer_utils.py
+index fb7d7bed7..be6a3ff4c 100644
+--- a/nncf/torch/layer_utils.py
++++ b/nncf/torch/layer_utils.py
+@@ -111,6 +111,23 @@ class _NNCFModuleMixin:
+         self.pre_ops.clear()
+         self.post_ops.clear()
+ 
++    def get_proxy_module(self, *args):
++        """
++        Gets a proxy module with pre-operations applied.
++        Args:
++            *args: Arguments for the pre-operations.
++        Returns:
++            ProxyModule: The proxy module with pre-operations applied.
++        """
++        proxy_module = ProxyModule(self)
++        for op in self.pre_ops.values():
++            op_args = op(proxy_module, *args)
++            if op_args is not None:
++                if not isinstance(op_args, tuple):
++                    op_args = (op_args,)
++                args = op_args
++        return proxy_module
++
+     def forward(self, *args):
+         proxy_module = ProxyModule(self)
+         for op in self.pre_ops.values():
