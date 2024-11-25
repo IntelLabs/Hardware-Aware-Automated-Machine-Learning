@@ -1,12 +1,12 @@
-"""
-Some NNCF config preprocessing code.
-
-This module provides preprocessing functionality for NNCF (Neural Network Compression Framework) configuration files
-used. It includes utility functions for handling JSON files and preprocessing NNCF configurations.
-"""
 import os
 import json
-from nncf import NNCFConfig
+
+try:
+    from nncf import NNCFConfig
+    from nncf.experimental.torch import sqft
+    is_nncf_available = True
+except ImportError:
+    is_nncf_available = False
 
 
 NNCF_CONFIG_TEMPLATE = {
@@ -22,19 +22,9 @@ NNCF_CONFIG_TEMPLATE = {
             "keyword": "attention_mask"
         }
     ],
-    "bootstrapNAS": {
+    "SQFT": {
         "training": {
-            "algorithm": "progressive_shrinking",
-            "frozen_layers_allowed": True,
-            "progressivity_of_elasticity": ["width"],
-            "batchnorm_adaptation": {
-                "num_bn_adaptation_samples": 0
-            },
-            "schedule": {
-                "list_stage_descriptions": [
-                    {"train_dims": ["width"], "epochs": -1, "depth_indicator": 1, "width_indicator": 8, "init_lr": -1, "epochs_lr": -1, "sample_rate": 1}
-                ]
-            },
+            "algorithm": "nls",
             "elasticity": {
                 "available_elasticity_dims": ["width"],
                 "width": {
@@ -58,13 +48,19 @@ def add_lr_epochs(nncf_config, learning_rate=3e-4, num_train_epochs=3):
     Returns:
         dict: The updated NNCF configuration.
     """
-    stage_description = nncf_config["bootstrapNAS"]["training"]["schedule"]["list_stage_descriptions"][0]
-    if stage_description["init_lr"] == -1:
-        stage_description["init_lr"] = learning_rate
-    if stage_description["epochs"] == -1:
-        stage_description["epochs"] = num_train_epochs
-        stage_description["epochs_lr"] = num_train_epochs
-
+    overwrite_groups_widths = nncf_config["SQFT"]["training"]["elasticity"]["width"]["overwrite_groups_widths"]
+    # Add learning rate and epochs to the configuration
+    nncf_config["SQFT"]["training"]["schedule"] = {
+        "list_stage_descriptions": [
+            {
+                "train_dims": ["width"],
+                "width_indicator": max([len(widths) for widths in overwrite_groups_widths]),
+                "init_lr": learning_rate,
+                "epochs": num_train_epochs,
+                "epochs_lr": num_train_epochs,
+            }
+        ]
+    }
     return nncf_config
 
 
@@ -95,7 +91,7 @@ def get_model_paths(model, target_module_name):
     return paths
 
 
-def load_nncf_config(
+def create_sqft_nncf_config(
     model,
     output_dir,
     num_train_epochs=3,
@@ -109,7 +105,7 @@ def load_nncf_config(
     Returns:
         NNCFConfig: The preprocessed NNCF configuration object.
     """
-
+    assert is_nncf_available, "NNCF is not installed. Please install it."
     if nncf_config is not None:
         nncf_config = NNCFConfig.from_json(nncf_config)
     else:
@@ -129,13 +125,13 @@ def load_nncf_config(
             # Transpose the list of lists to combine paths by their positions
             transposed_paths = list(zip(*group_paths))
             overwrite_groups.extend([list(path_group) for path_group in transposed_paths])
-        nncf_config_dict["bootstrapNAS"]["training"]["elasticity"]["width"]["overwrite_groups"] = overwrite_groups
+        nncf_config_dict["SQFT"]["training"]["elasticity"]["width"]["overwrite_groups"] = overwrite_groups
 
         overwrite_groups_widths = []
         for space in search_space:
             space = [int(width) for width in space.split(",")]
             overwrite_groups_widths.extend([space] * num_hidden_layers)
-        nncf_config_dict["bootstrapNAS"]["training"]["elasticity"]["width"]["overwrite_groups_widths"] = overwrite_groups_widths
+        nncf_config_dict["SQFT"]["training"]["elasticity"]["width"]["overwrite_groups_widths"] = overwrite_groups_widths
         assert len(overwrite_groups) == len(overwrite_groups_widths)
         nncf_config_dict = add_lr_epochs(
             nncf_config_dict,
