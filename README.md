@@ -6,6 +6,11 @@ This repository contains instructions and examples for efficient neural architec
 
 SQFT is a solution for fine-tuning low-precision and sparse large models using parameter-efficient fine-tuning (PEFT). It includes an innovative strategy that enables the merging of sparse weights with low-rank adapters without losing sparsity and accuracy, overcoming the limitations of previous approaches. SQFT also addresses the challenge of having quantized weights and adapters with different numerical precisions, enabling merging in the desired numerical format without sacrificing accuracy.
 
+### :fire:[SparAMX: Accelerating Compressed LLMs Token Generation on AMX-powered CPUs](./SparAMX/README.md)
+
+Large language models have high compute, latency, and memory requirements. While specialized accelerators such as GPUs and TPUs typically run these workloads, CPUs are more widely available and consume less energy. Accelerating LLMs with CPUs enables AI broader access at a lower cost and power consumption. This acceleration potential for CPUs is especially relevant during the memory-bound decoding stage of LLM inference, which processes one token at a time. Therefore, we utilize AMX support on the latest Intel CPUs along with unstructured sparsity to achieve a reduction in \textit{end-to-end} latency compared to the current PyTorch implementation by applying our technique in linear layers. 
+
+
 ### :fire:[Shears: Unstructured Sparsity with Neural Low-rank Adapter Search](./Shears/README.md) 
 
 Shears integrates cost-effective
