@@ -10,7 +10,7 @@ The fine-tuning microservice with NLS involves adapting the model to specific ta
 
 More details about SQFT can be found in this [paper](https://aclanthology.org/2024.findings-emnlp.749/). 
 
-## 🚀 Start the NLS Microservice with Python
+## 🚀 Start the NLS Microservice with Python (Option 1)
 
 Follow [these instructions](https://github.com/opea-project/GenAIComps/tree/main/comps/finetuning#1-start-microservice-with-python-option-1) to start the microservices.
 The difference is that when installing the requirements, additional dependencies need to be installed to enable NLS:
@@ -32,6 +32,26 @@ cd peft && git checkout v0.10.0 && git apply --ignore-space-change --ignore-whit
 # nncf
 git clone https://github.com/openvinotoolkit/nncf.git
 cd nncf && git checkout f143e1c && git apply --ignore-space-change --ignore-whitespace ${PATH_TO_FINETUNE}/patches/nncf-f143e1c.patch && pip install -e . && cd ..
+```
+
+## 🚀 Start the NLS Microservice with Docker (Option 2)
+
+#### Build Docker Image
+
+Build docker image with below command:
+
+```bash
+export HF_TOKEN=${your_huggingface_token}
+cd ../../
+docker build -t opea/finetuning-sqft:latest --build-arg https_proxy=$https_proxy --build-arg http_proxy=$http_proxy --build-arg HF_TOKEN=$HF_TOKEN -f comps/finetuning/Dockerfile .
+```
+
+#### Run Docker with CLI
+
+Start docker container with below command:
+
+```bash
+docker run -d --name="finetuning-sqft-server" -p 8015:8015 --runtime=runc --ipc=host -e http_proxy=$http_proxy -e https_proxy=$https_proxy opea/finetuning-sqft:latest
 ```
 
 ## 🚀 Consume the NLS Fine-tuning Service
