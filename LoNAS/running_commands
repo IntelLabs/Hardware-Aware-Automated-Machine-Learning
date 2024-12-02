@@ -43,7 +43,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_math.py \
   --warmup_steps 100 \
   --optim adamw_torch \
   --fp16 \
-  --output_dir ./trained_super_adapter/unified_math/lonas-bloomz-7b-math/ \
+  --output_dir ./trained_super_adapter/unified_math/lonas-bloomz-7b-math \
   --logging_steps 20 \
   --evaluation_strategy epoch \
   --save_strategy epoch \
@@ -62,9 +62,8 @@ GLUE benchmark
 #######################################
 
 # task: rte
-
 CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
-  --task_name rte
+  --task_name rte \
   --model_name_or_path bert-base-uncased \
   --do_train \
   --do_eval \
@@ -73,7 +72,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
   --per_device_eval_batch_size 64 \
   --num_train_epochs 80 \
   --max_seq_length 128 \
-  --output_dir ./trained_super_adapter/glue/lonas-bert-base-rte/ \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-rte \
   --logging_steps 20 \
   --evaluation_strategy epoch \
   --save_strategy epoch \
@@ -92,7 +91,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
 # task: mrpc
 
 CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
-  --task_name mrpc
+  --task_name mrpc \
   --model_name_or_path bert-base-uncased \
   --do_train \
   --do_eval \
@@ -101,7 +100,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
   --per_device_eval_batch_size 64 \
   --num_train_epochs 35 \
   --max_seq_length 128 \
-  --output_dir ./trained_super_adapter/glue/lonas-bert-base-mrpc/ \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-mrpc \
   --logging_steps 20 \
   --evaluation_strategy epoch \
   --save_strategy epoch \
@@ -119,7 +118,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
 # task: stsb
 
 CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
-  --task_name stsb
+  --task_name stsb \
   --model_name_or_path bert-base-uncased \
   --do_train \
   --do_eval \
@@ -128,7 +127,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
   --per_device_eval_batch_size 64 \
   --num_train_epochs 60 \
   --max_seq_length 128 \
-  --output_dir ./trained_super_adapter/glue/lonas-bert-base-stsb/ \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-stsb \
   --logging_steps 20 \
   --evaluation_strategy epoch \
   --save_strategy epoch \
@@ -146,7 +145,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
 # task: cola
 
 CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
-  --task_name cola
+  --task_name cola \
   --model_name_or_path bert-base-uncased \
   --do_train \
   --do_eval \
@@ -155,7 +154,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
   --per_device_eval_batch_size 64 \
   --num_train_epochs 80 \
   --max_seq_length 128 \
-  --output_dir ./trained_super_adapter/glue/lonas-bert-base-cola/ \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-cola \
   --logging_steps 20 \
   --evaluation_strategy epoch \
   --save_strategy epoch \
@@ -173,7 +172,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
 # task: sst2
 
 CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
-  --task_name sst2
+  --task_name sst2 \
   --model_name_or_path bert-base-uncased \
   --do_train \
   --do_eval \
@@ -182,7 +181,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
   --per_device_eval_batch_size 64 \
   --num_train_epochs 60 \
   --max_seq_length 128 \
-  --output_dir ./trained_super_adapter/glue/lonas-bert-base-sst2/ \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-sst2 \
   --logging_steps 20 \
   --evaluation_strategy epoch \
   --save_strategy epoch \
@@ -200,7 +199,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
 # task: qnli
 
 CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
-  --task_name qnli
+  --task_name qnli \
   --model_name_or_path bert-base-uncased \
   --do_train \
   --do_eval \
@@ -209,7 +208,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
   --per_device_eval_batch_size 64 \
   --num_train_epochs 80 \
   --max_seq_length 256 \
-  --output_dir ./trained_super_adapter/glue/lonas-bert-base-qnli/ \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-qnli \
   --logging_steps 20 \
   --evaluation_strategy epoch \
   --save_strategy epoch \
@@ -227,7 +226,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
 # task: qqp
 
 CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
-  --task_name qqp
+  --task_name qqp \
   --model_name_or_path bert-base-uncased \
   --do_train \
   --do_eval \
@@ -236,7 +235,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
   --per_device_eval_batch_size 64 \
   --num_train_epochs 60 \
   --max_seq_length 128 \
-  --output_dir ./trained_super_adapter/glue/lonas-bert-base-qqp/ \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-qqp \
   --logging_steps 20 \
   --evaluation_strategy epoch \
   --save_strategy epoch \
@@ -254,7 +253,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
 # task: mnli
 
 CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
-  --task_name mnli
+  --task_name mnli \
   --model_name_or_path bert-base-uncased \
   --do_train \
   --do_eval \
@@ -263,7 +262,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_glue.py \
   --per_device_eval_batch_size 64 \
   --num_train_epochs 40 \
   --max_seq_length 128 \
-  --output_dir ./trained_super_adapter/glue/lonas-bert-base-mnli/ \
+  --output_dir ./trained_super_adapter/glue/lonas-bert-base-mnli \
   --logging_steps 20 \
   --evaluation_strategy epoch \
   --save_strategy epoch \
