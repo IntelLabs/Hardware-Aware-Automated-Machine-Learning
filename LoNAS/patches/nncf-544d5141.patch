@@ -1,5 +1,21 @@
+diff --git a/nncf/common/pruning/shape_pruning_processor.py b/nncf/common/pruning/shape_pruning_processor.py
+index 6214551bf..525da5add 100644
+--- a/nncf/common/pruning/shape_pruning_processor.py
++++ b/nncf/common/pruning/shape_pruning_processor.py
+@@ -203,7 +203,10 @@ class ShapePruningProcessor:
+             next_nodes_cluster = next_nodes_cluster - cluster_nodes
+             next_nodes[cluster.id] = []
+             for next_node in next_nodes_cluster:
+-                sparse_multiplier = self._get_next_node_sparse_multiplier(graph, next_node, cluster)
++                try:
++                    sparse_multiplier = self._get_next_node_sparse_multiplier(graph, next_node, cluster)
++                except:
++                    sparse_multiplier = 1
+                 next_nodes[cluster.id].append(
+                     {"node_name": next_node.node_name, "sparse_multiplier": sparse_multiplier}
+                 )
 diff --git a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elasticity_builder.py b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elasticity_builder.py
-index bc6464b2..9f7a2f3d 100644
+index bc6464b24..9f7a2f3d7 100644
 --- a/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elasticity_builder.py
 +++ b/nncf/experimental/torch/nas/bootstrapNAS/elasticity/elasticity_builder.py
 @@ -9,7 +9,7 @@
@@ -8,11 +24,11 @@ index bc6464b2..9f7a2f3d 100644
  from collections import OrderedDict
 -from typing import Any, Dict, List
 +from typing import Any, Dict, List, Tuple
- 
+
  from nncf import NNCFConfig
  from nncf.experimental.torch.nas.bootstrapNAS.elasticity.base_handler import SingleElasticityBuilder
 @@ -152,3 +152,8 @@ class ElasticityBuilder(PTCompressionAlgorithmBuilder):
- 
+
          # No conflict resolving with the related config options, parameters are overridden by compression state
          self._available_elasticity_dims = list(map(ElasticityDim, available_elasticity_dims_state))
 +
@@ -21,7 +37,7 @@ index bc6464b2..9f7a2f3d 100644
 +            return True, "Frozen layers are allowed (set in NNCF config)"
 +        return super()._are_frozen_layers_allowed()
 diff --git a/nncf/experimental/torch/nas/bootstrapNAS/training/progressive_shrinking_builder.py b/nncf/experimental/torch/nas/bootstrapNAS/training/progressive_shrinking_builder.py
-index 92609327..fefdc2f6 100644
+index 92609327f..fefdc2f6d 100644
 --- a/nncf/experimental/torch/nas/bootstrapNAS/training/progressive_shrinking_builder.py
 +++ b/nncf/experimental/torch/nas/bootstrapNAS/training/progressive_shrinking_builder.py
 @@ -8,7 +8,7 @@

@@ -4,6 +4,8 @@ Official implementation of [Shears: Unstructured Sparsity with Neural Low-rank A
 
 This repo contains the code for **Shears**, a practical and novel solution that generates efficient models fine-tuned for downstream-specific tasks for real-world applications. Please refer to our paper for more details.
 
+> :warning: Please see the more recent work [SQFT](../SQFT). Its SparsePEFT strategy is not only comparable to Shears, but it can also merge adapters into sparse models without losing sparsity.
+
 ## News
 - **[2024.04.18]**  **Shears V1** paper has been released ([link](https://arxiv.org/abs/2404.10934)) and **accepted by NAACL 2024 (Industry Track)**. :books:
 - **[2024.04.11]**  Release training and inference code for **Shears V1**. :tada:
@@ -37,8 +39,9 @@ Overall, Shears has a well-designed, simple yet effective, powerful, and general
 Here is an installation script developed from scratch for **Shears**.
 
 ```
-conda create -n shearsv1 -y python=3.10
-conda activate shearsv1
+pip install virtualenv
+virtualenv shears-env
+source shears-env/bin/activate
 
 # install pytorch
 pip install torch==2.1.2
@@ -78,15 +81,13 @@ git clone https://github.com/locuslab/wanda.git && cd wanda && git checkout 8e8f
 
 Below is an example command for unstructured sparsifying LLaMA-7B with Wanda to achieve unstructured 50% sparsity (takes about five minutes).
 ```bash
-SPARSE_MODEL_PATH=shears-llama-7b-50-base
-
 python wanda/main.py \
     --model yahma/llama-7b-hf \
     --prune_method wanda \
     --sparsity_ratio 0.5 \
     --sparsity_type unstructured \
     --save wanda_out \
-    --save_model $SPARSE_MODEL_PATH
+    --save_model <path to sparse model>
 ```
 - `--model`: The identifier for the model on the Hugging Face model hub or local path.
 - `--sparsity_ratio`: Specifies the percentage of weights to be pruned.
@@ -100,17 +101,14 @@ It is worth noting that the sparsifying step can be replaced by any other sparse
 
 #### Step 2. Adapter Training
 
-Taking the unified math reasoning training as an example, please download the 10K instruction-following math reasoning training data ([link](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)) from [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters), and place it under `DATA_PATH`. 
+Taking the unified math reasoning training as an example, please download the 10K instruction-following math reasoning training data ([link](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/math_10k.json)) from [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters). 
 
 Example command to train the super-adapter of the pruned LLaMA-7B using Shears:
 
 ```bash
-ADAPTER_MODEL_PATH=trained_super_adapter/shears-llama-7b-50-math-super-adapter
-NNCF_CONFIG=nncf_config/nncf_shears_llama.json
-
 python run_math.py \
-    --dataset_path $DATA_PATH/math_10k.json \
-    --model_name_or_path $SPARSE_MODEL_PATH \
+    --dataset_path math_10k.json \
+    --model_name_or_path <path to sparse model> \
     --do_train \
     --per_device_train_batch_size 8 \
     --gradient_accumulation_steps 2 \
@@ -119,7 +117,7 @@ python run_math.py \
     --warmup_steps 100 \
     --optim adamw_torch \
     --fp16 \
-    --output_dir $ADAPTER_MODEL_PATH \
+    --output_dir <path to super-adapter> \
     --logging_steps 20 \
     --save_strategy epoch \
     --save_total_limit 2 \
@@ -128,7 +126,7 @@ python run_math.py \
     --lora_alpha 64 \
     --lora_dropout 0.1 \
     --target_modules q_proj,k_proj,v_proj,up_proj,down_proj \
-    --nncf_config $NNCF_CONFIG
+    --nncf_config nncf_config/nncf_shears_llama.json
 ```
 
 `--nncf_config` indicates the NNCF configuration, including the search space for elastic adapters.
@@ -149,22 +147,22 @@ Example command to evaluate the trained super-adapter (heuristic subnetwork):
 
 ```bash
 python run_math.py \
-    --model_name_or_path $SPARSE_MODEL_PATH \
+    --model_name_or_path <path to sparse model> \
     --lora \
-    --lora_weights $ADAPTER_MODEL_PATH \
+    --lora_weights <path to super-adapter> \
     --do_test \
-    --output_dir $ADAPTER_MODEL_PATH/results \
-    --nncf_config $NNCF_CONFIG
+    --output_dir <path to results> \
+    --nncf_config nncf_config/nncf_shears_llama.json
 ```
 
 The above command can also be used to test the released model, for example,
 ```bash
 python run_math.py \
-    --model_name_or_path $SPARSE_MODEL_PATH \
+    --model_name_or_path <path to sparse model> \
     --lora \
     --lora_weights IntelLabs/shears-llama-7b-50-math-super-adapter \
     --do_test \
-    --output_dir ./results \
+    --output_dir <path to results> \
     --nncf_config nncf_config/nncf_shears_llama.json
 ```
 Note that the torch version we used in our experiments is `1.12.1+cu113`, and the results might vary with different versions.

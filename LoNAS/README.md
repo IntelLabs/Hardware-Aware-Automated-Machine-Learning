@@ -1,24 +1,25 @@
 # LoNAS
 
-Official implementation of [LoNAS: Elastic Low-Rank Adapters for Efficient Large Language Models]().
+Official implementation of [LoNAS: Elastic Low-Rank Adapters for Efficient Large Language Models](https://aclanthology.org/2024.lrec-main.940).
 
-This repo contains the code for **LoNAS**, which is a pioneering method that leverages Neural Architecture Search (NAS) to explore a space of elastic low-rank adapters, effectively compressing large language models while maintaining or even enhancing performance, thus facilitating their use in resource-constrained environments. Please refer to our [paper]() for more details.
+This repo contains the code for **LoNAS**, which is a pioneering method that leverages Neural Architecture Search (NAS) to explore a space of elastic low-rank adapters, effectively compressing large language models while maintaining or even enhancing performance, thus facilitating their use in resource-constrained environments. Please refer to our [paper](https://aclanthology.org/2024.lrec-main.940) for more details.
 
 ## Setup
 
 Here is an installation script developed from scratch for **LoNAS**.
 
 ```
-conda create -n lonas -y python=3.10
-conda activate lonas
+pip install virtualenv
+virtualenv lonas-env
+source lonas-env/bin/activate
 
 # install pytorch
 pip install torch==2.1.2
 
 # install dependencies
 bash install.sh
+# Note: please ignore the whitespace issues when applying the patch and running `install.sh`.
 ```
-Note: Please ignore the whitespace issues when applying the patch and running `install.sh`.
 
 ## Quick Start
 
@@ -26,13 +27,13 @@ Note: Please ignore the whitespace issues when applying the patch and running `i
 
 Taking the unified commonsense reasoning training as an example, please download the 15K 
 instruction-following [commonsense reasoning training data](https://github.com/AGI-Edgerunners/LLM-Adapters/blob/main/ft-training_set/commonsense_15k.json) 
-from [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters), and place it under `DATA_PATH`. 
+from [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters). 
 
 Example command to train a super-adapter of LLaMA-7B using LoNAS:
 
 ```bash
-CUDA_VISIBLE_DEVICES=${DEVICES} python run_commonsense.py \
-    --dataset_path $DATA_PATH//commonsense_15k.json \
+python run_commonsense.py \
+    --dataset_path commonsense_15k.json \
     --model_name_or_path yahma/llama-7b-hf \
     --do_train \
     --per_device_train_batch_size 4 \
@@ -41,7 +42,7 @@ CUDA_VISIBLE_DEVICES=${DEVICES} python run_commonsense.py \
     --warmup_steps 100 \
     --optim adamw_torch \
     --fp16 \
-    --output_dir trained_super_adapter/unified_commonsense/lonas-llama-7b-commonsense \
+    --output_dir <path to super-adapter> \
     --logging_steps 20 \
     --save_strategy epoch \
     --save_total_limit 2 \
@@ -65,29 +66,29 @@ rather than within the arguments of `TrainingArguments`. For instance,
 },
 ```
 For more details on the stage scheduler, see [BootstrapNAS.md](https://github.com/openvinotoolkit/nncf/blob/develop/nncf/experimental/torch/nas/bootstrapNAS/BootstrapNAS.md).
-After training, the weights of the trained super-adapter will be obtained in the `--output_dir` directory.
+After training, the weights of the trained super-adapter will be obtained in the `output_dir` directory.
 
 
 ### Evaluation
 
 All evaluation datasets can be downloaded from [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters).
-Place them into the directory `datasets/`.
+Place them into the directory `datasets`.
 ```
 git clone https://github.com/AGI-Edgerunners/LLM-Adapters.git
-mv LLM-Adapters/dataset/ datasets/ 
+mv LLM-Adapters/dataset datasets 
 ```
 
 Example command to evaluate the trained super-adapter (heuristic subnetwork):
 
 ```bash
-CUDA_VISIBLE_DEVICES=${DEVICES} python run_commonsense.py \
+python run_commonsense.py \
     --dataset_path None \
     --model_name_or_path yahma/llama-7b-hf \
     --lora \
-    --lora_weights trained_super_adapter/unified_commonsense/lonas-llama-7b-commonsense \
+    --lora_weights <path to super-adapter> \
     --nncf_config nncf_config/unified_commonsense/nncf_lonas_llama_7b.json \
     --do_test \
-    --output_dir trained_super_adapter/unified_commonsense/lonas-llama-7b-commonsense/results
+    --output_dir <path to results>
 ```
 
 This command evaluates the performance of the heuristic subnetwork across eight commonsense reasoning tasks: 
@@ -113,18 +114,18 @@ such as:
 ```
 
 Further details can be found in [BootstrapNAS.md](https://github.com/openvinotoolkit/nncf/blob/develop/nncf/experimental/torch/nas/bootstrapNAS/BootstrapNAS.md). 
-The following is an example command to search for the trained super adapter:
+The following is an example command to search for the trained super-adapter:
 
 ```bash
-CUDA_VISIBLE_DEVICES=${DEVICES} python run_commonsense.py \
-    --dataset_path $DATA_PATH//commonsense_15k.json \
+python run_commonsense.py \
+    --dataset_path commonsense_15k.json \
     --model_name_or_path yahma/llama-7b-hf \
     --lora \
-    --lora_weights trained_super_adapter/unified_commonsense/lonas-llama-7b-commonsense \
+    --lora_weights <path to super-adapter> \
     --val_set_size 1000
     --nncf_config nncf_config/unified_commonsense/nncf_lonas_llama_7b.json \
     --do_search \
-    --output_dir trained_super_adapter/unified_commonsense/lonas-llama-7b-commonsense/search
+    --output_dir <path to search results>
 ```
 
 The argument `--val_set_size 1000` signifies the utilization of 1k validation samples to evaluate each discovered 
