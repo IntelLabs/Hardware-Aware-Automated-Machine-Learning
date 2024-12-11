@@ -34,10 +34,11 @@ def main():
         adapter_model_path,
         torch_dtype=dtype,
         device_map="auto"
-    ).eval()
+    )
+    model.eval()
 
     if getattr(model.active_peft_config, "quantization_aware", False):
-        from modules.sqft_qa_linear import SQFTQuantAwareLinear
+        from modules.sqft_linear import SQFTQuantAwareLinear
 
         def find_layers(module, layers=[SQFTQuantAwareLinear], name=''):
             """

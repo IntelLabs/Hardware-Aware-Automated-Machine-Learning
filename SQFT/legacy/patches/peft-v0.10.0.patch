@@ -35,7 +35,7 @@ index cc5c60a..fa1422e 100644
      def __post_init__(self):
          self.peft_type = PeftType.LORA
 diff --git a/src/peft/tuners/lora/gptq.py b/src/peft/tuners/lora/gptq.py
-index 333dfa6..c5860bc 100644
+index 333dfa6..7272824 100644
 --- a/src/peft/tuners/lora/gptq.py
 +++ b/src/peft/tuners/lora/gptq.py
 @@ -108,7 +108,17 @@ def dispatch_gptq(
@@ -46,9 +46,9 @@ index 333dfa6..c5860bc 100644
 +        quantization_aware = kwargs.get("quantization_aware", False)
 +        if quantization_aware:
 +            # Attempt to import the `SQFTQuantAwareLinear` module
-+            # from https://github.com/IntelLabs/Hardware-Aware-Automated-Machine-Learning/blob/main/SQFT/modules/sqft_qa_linear.py
++            # from https://github.com/IntelLabs/Hardware-Aware-Automated-Machine-Learning/blob/main/SQFT/modules/sqft_linear.py
 +            try:
-+                from modules.sqft_qa_linear import SQFTQuantAwareLinear
++                from modules.sqft_linear import SQFTQuantAwareLinear
 +            except ImportError:
 +                raise ImportError("The module 'SQFTQuantAwareLinear' could not be imported.")
 +            new_module = SQFTQuantAwareLinear(target, adapter_name, **kwargs)
@@ -58,10 +58,21 @@ index 333dfa6..c5860bc 100644
  
      return new_module
 diff --git a/src/peft/tuners/lora/layer.py b/src/peft/tuners/lora/layer.py
-index 829b7bd..4d5db54 100644
+index 829b7bd..9d83967 100644
 --- a/src/peft/tuners/lora/layer.py
 +++ b/src/peft/tuners/lora/layer.py
-@@ -346,6 +346,7 @@ class Linear(nn.Module, LoraLayer):
+@@ -28,6 +28,10 @@ from peft.utils.other import transpose
+ 
+ from .config import LoraConfig
+ 
++try:
++    from nncf.torch.layers import NNCFLinear
++except ImportError:
++    NNCFLinear = None
+ 
+ class LoraLayer(BaseTunerLayer):
+     # All names of layers that may contain (trainable) adapter weights
+@@ -346,6 +350,7 @@ class Linear(nn.Module, LoraLayer):
          init_lora_weights: Union[bool, str] = True,
          use_rslora: bool = False,
          use_dora: bool = False,
@@ -69,7 +80,7 @@ index 829b7bd..4d5db54 100644
          **kwargs,
      ) -> None:
          super().__init__()
-@@ -363,6 +364,7 @@ class Linear(nn.Module, LoraLayer):
+@@ -363,6 +368,7 @@ class Linear(nn.Module, LoraLayer):
              use_dora=use_dora,
          )
          self.is_target_conv_1d_layer = is_target_conv_1d_layer
@@ -77,7 +88,7 @@ index 829b7bd..4d5db54 100644
  
      def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
          """
-@@ -471,6 +473,10 @@ class Linear(nn.Module, LoraLayer):
+@@ -471,6 +477,10 @@ class Linear(nn.Module, LoraLayer):
              weight_B = weight_B.float()
  
          output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
@@ -88,7 +99,7 @@ index 829b7bd..4d5db54 100644
  
          if cast_to_fp32:
              output_tensor = output_tensor.to(dtype=dtype)
-@@ -506,7 +512,16 @@ class Linear(nn.Module, LoraLayer):
+@@ -506,7 +516,26 @@ class Linear(nn.Module, LoraLayer):
                  x = x.to(lora_A.weight.dtype)
  
                  if not self.use_dora[active_adapter]:
@@ -96,9 +107,19 @@ index 829b7bd..4d5db54 100644
 +                    if not self.sparse_adapter:
 +                        result = result + lora_B(lora_A(dropout(x))) * scaling
 +                    else:
-+                        lora_A_weight = lora_A.weight
-+                        lora_B_weight = lora_B.weight
-+                        adapter_weight = torch.matmul(lora_B_weight, lora_A_weight) * scaling
++                        # Since 'sparse_adapter' is enabled, we need to multiply the parameter matrices of `lora_B` and
++                        # `lora_A` here instead of calling the forward methods of `lora_B` and `lora_A`. This results
++                        # in the NNCF graph not recognizing lora A and lora B nodes when using NLS strategy. Therefore,
++                        # we execute `lora_B(lora_A(x))` solely to include these two NNCFLinear nodes in the NNCF graph.
++                        if NNCFLinear is not None and not self.training:
++                            lora_B(lora_A(x))
++                        if NNCFLinear is not None and isinstance(lora_A, NNCFLinear):
++                            adapter_weight = torch.matmul(
++                                lora_B.get_proxy_module(x).weight,
++                                lora_A.get_proxy_module(x).weight
++                            ) * scaling
++                        else:
++                            adapter_weight = torch.matmul(lora_B.weight, lora_A.weight) * scaling
 +                        # Apply the sparse mask to BA (`adapter_weight`).
 +                        mask = (self.base_layer.weight != 0).detach()
 +                        adapter_weight = adapter_weight * mask
