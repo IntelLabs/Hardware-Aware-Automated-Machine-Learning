@@ -1,7 +1,6 @@
 import argparse
 from transformers import AutoModelForCausalLM, AutoTokenizer, GPTQConfig
 
-
 def main():
     parser = argparse.ArgumentParser(description="Quantize and save a model.")
     parser.add_argument("--base_model_path", type=str, required=True, help="Path to the base model.")

@@ -1,7 +1,6 @@
 import re
 from datasets import Dataset, load_dataset
 
-
 def add_prompt_func_piqa(document):
     """Add prompt to PIQA dataset document.
 
