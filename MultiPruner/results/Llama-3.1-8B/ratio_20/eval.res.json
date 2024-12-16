@@ -1,0 +1,11 @@
+{
+    "total_params": 8030261248,
+    "pruned_model_params": 6423842816,
+    "ppl_wikitext2": 13.86,
+    "5cs_acc_avg": 63.07000000000001,
+    "arc_challenge": 41.72,
+    "arc_easy": 64.98,
+    "hellaswag": 65.38000000000001,
+    "winogrande": 68.97999999999999,
+    "piqa": 74.27
+}

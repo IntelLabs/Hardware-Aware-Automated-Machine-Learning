@@ -1,0 +1,401 @@
+diff --git a/src/transformers/cache_utils.py b/src/transformers/cache_utils.py
+index d41bc99ee..f74ee777f 100644
+--- a/src/transformers/cache_utils.py
++++ b/src/transformers/cache_utils.py
+@@ -419,7 +419,7 @@ class DynamicCache(Cache):
+             A tuple containing the updated key and value states.
+         """
+         # Update the number of seen tokens
+-        if layer_idx == 0:
++        if layer_idx == 0 and key_states is not None:
+             self._seen_tokens += key_states.shape[-2]
+ 
+         # Update the cache
+@@ -432,8 +432,10 @@ class DynamicCache(Cache):
+             self.key_cache[layer_idx] = key_states
+             self.value_cache[layer_idx] = value_states
+         else:
+-            self.key_cache[layer_idx] = torch.cat([self.key_cache[layer_idx], key_states], dim=-2)
+-            self.value_cache[layer_idx] = torch.cat([self.value_cache[layer_idx], value_states], dim=-2)
++            if key_states is not None:
++                self.key_cache[layer_idx] = torch.cat([self.key_cache[layer_idx], key_states], dim=-2)
++            if value_states is not None:
++                self.value_cache[layer_idx] = torch.cat([self.value_cache[layer_idx], value_states], dim=-2)
+ 
+         return self.key_cache[layer_idx], self.value_cache[layer_idx]
+ 
+diff --git a/src/transformers/modeling_utils.py b/src/transformers/modeling_utils.py
+index 3e3d78908..fb17c952d 100755
+--- a/src/transformers/modeling_utils.py
++++ b/src/transformers/modeling_utils.py
+@@ -4024,6 +4024,40 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+                 gguf_path=gguf_path,
+             )
+ 
++        def get_layer_by_key(model, key, layer_depth=3):
++            # Split the key into parts
++            parts = key.split('.')
++
++            # Only keep the parts up to the specified layer depth
++            layer_parts = parts[:layer_depth]
++
++            # Traverse the model using the layer parts
++            module = model
++            for part in layer_parts:
++                if hasattr(module, part):
++                    module = getattr(module, part)
++                else:
++                    raise AttributeError(f"Module does not have attribute '{part}'")
++
++            return module
++
++        if len(missing_keys) > 0:
++            # supports llama, qwen
++            for key in missing_keys:
++                layer = get_layer_by_key(model, key)
++                if ".self_attn" in key:
++                    layer.mask_attn = True
++                    logger.warning(
++                        f"Some weights of MHA module in {layer.__class__.__name__} were not initialized from the model checkpoint at"
++                        f" {pretrained_model_name_or_path} and the corresponding MHA module is pruned: {key}"
++                    )
++                elif ".mlp" in key:
++                    layer.mask_mlp = True
++                    logger.warning(
++                        f"Some weights of MLP module in {layer.__class__.__name__} were not initialized from the model checkpoint at"
++                        f" {pretrained_model_name_or_path} and the corresponding MLP module is pruned: {key}"
++                    )
++
+         # make sure token embedding weights are still tied if needed
+         model.tie_weights()
+ 
+@@ -4403,6 +4437,33 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+             }
+         else:
+             offload_index = None
++        
++        def module_reshape(state_dict):
++            for param_name, param in state_dict.items():
++                if ".bias" in param_name:
++                    continue
++                tensor_name = param_name
++                splits = tensor_name.split(".")
++                if len(splits) > 1:
++                    module = model_to_load
++                    parent = None
++                    for split in splits[:-1]:
++                        new_module = getattr(module, split)
++                        if new_module is None:
++                            raise ValueError(f"{module} has no attribute {split}.")
++                        parent = module
++                        module = new_module
++                    tensor_name = splits[-1]
++                    old_value = getattr(module, tensor_name)
++                    if old_value.shape != param.shape and isinstance(module, nn.Linear):
++                        new_module = torch.nn.Linear(
++                            param.shape[1],
++                            param.shape[0],
++                            bias=module.bias is not None,
++                            dtype=module.weight.dtype,
++                            device=module.weight.device
++                        )
++                        setattr(parent, splits[-2], new_module)
+ 
+         if state_dict is not None:
+             # Whole checkpoint
+@@ -4414,6 +4475,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+                 remove_prefix_from_model,
+                 ignore_mismatched_sizes,
+             )
++            module_reshape(state_dict)
+ 
+             # For GGUF models `state_dict` is never set to None as the state dict is always small
+             if gguf_path:
+@@ -4485,6 +4547,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+                     remove_prefix_from_model,
+                     ignore_mismatched_sizes,
+                 )
++                module_reshape(state_dict)
+                 if low_cpu_mem_usage:
+                     if is_fsdp_enabled() and not is_local_dist_rank_0() and not is_quantized:
+                         for key, param in model_to_load.state_dict().items():
+diff --git a/src/transformers/models/llama/modeling_llama.py b/src/transformers/models/llama/modeling_llama.py
+index 73b6bcd8b..2128f4148 100644
+--- a/src/transformers/models/llama/modeling_llama.py
++++ b/src/transformers/models/llama/modeling_llama.py
+@@ -393,9 +393,9 @@ class LlamaAttention(nn.Module):
+             key_states = self.k_proj(hidden_states)
+             value_states = self.v_proj(hidden_states)
+ 
+-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
++        query_states = query_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
++        key_states = key_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
++        value_states = value_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
+ 
+         if position_embeddings is None:
+             logger.warning_once(
+@@ -427,9 +427,9 @@ class LlamaAttention(nn.Module):
+         attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
+         attn_output = torch.matmul(attn_weights, value_states)
+ 
+-        if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
++        if attn_output.size(0) != bsz or attn_output.size(2) != q_len or attn_output.size(3) != self.head_dim:
+             raise ValueError(
+-                f"`attn_output` should be of size {(bsz, self.num_heads, q_len, self.head_dim)}, but is"
++                f"`attn_output` should be of size {(bsz, -1, q_len, self.head_dim)}, but is"
+                 f" {attn_output.size()}"
+             )
+ 
+@@ -493,9 +493,9 @@ class LlamaFlashAttention2(LlamaAttention):
+         # Flash attention requires the input to have the shape
+         # batch_size x seq_length x head_dim x hidden_dim
+         # therefore we just need to keep the original shape
+-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
++        query_states = query_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
++        key_states = key_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
++        value_states = value_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
+ 
+         if position_embeddings is None:
+             logger.warning_once(
+@@ -613,9 +613,9 @@ class LlamaSdpaAttention(LlamaAttention):
+         key_states = self.k_proj(hidden_states)
+         value_states = self.v_proj(hidden_states)
+ 
+-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
++        query_states = query_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
++        key_states = key_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
++        value_states = value_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
+ 
+         if position_embeddings is None:
+             logger.warning_once(
+@@ -686,6 +686,8 @@ class LlamaDecoderLayer(nn.Module):
+         self.mlp = LlamaMLP(config)
+         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
++        self.mask_attn = False
++        self.mask_mlp = False
+ 
+     def forward(
+         self,
+@@ -721,29 +723,32 @@ class LlamaDecoderLayer(nn.Module):
+                 Arbitrary kwargs to be ignored, used for FSDP and other methods that injects code
+                 into the model
+         """
+-        residual = hidden_states
+-
+-        hidden_states = self.input_layernorm(hidden_states)
+-
+-        # Self Attention
+-        hidden_states, self_attn_weights, present_key_value = self.self_attn(
+-            hidden_states=hidden_states,
+-            attention_mask=attention_mask,
+-            position_ids=position_ids,
+-            past_key_value=past_key_value,
+-            output_attentions=output_attentions,
+-            use_cache=use_cache,
+-            cache_position=cache_position,
+-            position_embeddings=position_embeddings,
+-            **kwargs,
+-        )
+-        hidden_states = residual + hidden_states
++        
++        self_attn_weights, present_key_value = None, None
++        if not self.mask_attn:
++            residual = hidden_states
++            hidden_states = self.input_layernorm(hidden_states)
++
++            # Self Attention
++            hidden_states, self_attn_weights, present_key_value = self.self_attn(
++                hidden_states=hidden_states,
++                attention_mask=attention_mask,
++                position_ids=position_ids,
++                past_key_value=past_key_value,
++                output_attentions=output_attentions,
++                use_cache=use_cache,
++                cache_position=cache_position,
++                position_embeddings=position_embeddings,
++                **kwargs,
++            )
++            hidden_states = residual + hidden_states
+ 
+-        # Fully Connected
+-        residual = hidden_states
+-        hidden_states = self.post_attention_layernorm(hidden_states)
+-        hidden_states = self.mlp(hidden_states)
+-        hidden_states = residual + hidden_states
++        if not self.mask_mlp:
++            # Fully Connected
++            residual = hidden_states
++            hidden_states = self.post_attention_layernorm(hidden_states)
++            hidden_states = self.mlp(hidden_states)
++            hidden_states = residual + hidden_states
+ 
+         outputs = (hidden_states,)
+ 
+@@ -751,6 +756,8 @@ class LlamaDecoderLayer(nn.Module):
+             outputs += (self_attn_weights,)
+ 
+         if use_cache:
++            if self.mask_attn:
++                past_key_value.update(None, None, self.self_attn.layer_idx)
+             outputs += (present_key_value,)
+ 
+         return outputs
+@@ -1023,7 +1030,7 @@ class LlamaModel(LlamaPreTrainedModel):
+             all_hidden_states += (hidden_states,)
+ 
+         next_cache = next_decoder_cache if use_cache else None
+-        if return_legacy_cache:
++        if return_legacy_cache and next_cache is not None:
+             next_cache = next_cache.to_legacy_cache()
+ 
+         if not return_dict:
+diff --git a/src/transformers/models/qwen2/modeling_qwen2.py b/src/transformers/models/qwen2/modeling_qwen2.py
+index 10c0b6f38..763c5d813 100644
+--- a/src/transformers/models/qwen2/modeling_qwen2.py
++++ b/src/transformers/models/qwen2/modeling_qwen2.py
+@@ -345,9 +345,9 @@ class Qwen2Attention(nn.Module):
+         key_states = self.k_proj(hidden_states)
+         value_states = self.v_proj(hidden_states)
+ 
+-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
++        query_states = query_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
++        key_states = key_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
++        value_states = value_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
+ 
+         if position_embeddings is None:
+             logger.warning_once(
+@@ -379,9 +379,9 @@ class Qwen2Attention(nn.Module):
+         attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
+         attn_output = torch.matmul(attn_weights, value_states)
+ 
+-        if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
++        if attn_output.size(0) != bsz or attn_output.size(2) != q_len or attn_output.size(3) != self.head_dim:
+             raise ValueError(
+-                f"`attn_output` should be of size {(bsz, self.num_heads, q_len, self.head_dim)}, but is"
++                f"`attn_output` should be of size {(bsz, -1, q_len, self.head_dim)}, but is"
+                 f" {attn_output.size()}"
+             )
+ 
+@@ -431,9 +431,9 @@ class Qwen2FlashAttention2(Qwen2Attention):
+         key_states = self.k_proj(hidden_states)
+         value_states = self.v_proj(hidden_states)
+ 
+-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
++        query_states = query_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
++        key_states = key_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
++        value_states = value_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
+ 
+         if position_embeddings is None:
+             logger.warning_once(
+@@ -581,9 +581,9 @@ class Qwen2SdpaAttention(Qwen2Attention):
+         key_states = self.k_proj(hidden_states)
+         value_states = self.v_proj(hidden_states)
+ 
+-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
++        query_states = query_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
++        key_states = key_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
++        value_states = value_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
+ 
+         if position_embeddings is None:
+             logger.warning_once(
+@@ -630,7 +630,7 @@ class Qwen2SdpaAttention(Qwen2Attention):
+         )
+ 
+         attn_output = attn_output.transpose(1, 2).contiguous()
+-        attn_output = attn_output.view(bsz, q_len, self.hidden_size)
++        attn_output = attn_output.view(bsz, q_len, -1)
+ 
+         attn_output = self.o_proj(attn_output)
+ 
+@@ -660,6 +660,9 @@ class Qwen2DecoderLayer(nn.Module):
+         self.input_layernorm = Qwen2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+         self.post_attention_layernorm = Qwen2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+ 
++        self.mask_attn = False
++        self.mask_mlp = False
++
+     def forward(
+         self,
+         hidden_states: torch.Tensor,
+@@ -694,28 +697,31 @@ class Qwen2DecoderLayer(nn.Module):
+                 into the model
+         """
+ 
+-        residual = hidden_states
++        self_attn_weights, present_key_value = None, None
++        if not self.mask_attn:
++            residual = hidden_states
+ 
+-        hidden_states = self.input_layernorm(hidden_states)
++            hidden_states = self.input_layernorm(hidden_states)
+ 
+-        # Self Attention
+-        hidden_states, self_attn_weights, present_key_value = self.self_attn(
+-            hidden_states=hidden_states,
+-            attention_mask=attention_mask,
+-            position_ids=position_ids,
+-            past_key_value=past_key_value,
+-            output_attentions=output_attentions,
+-            use_cache=use_cache,
+-            cache_position=cache_position,
+-            position_embeddings=position_embeddings,
+-        )
+-        hidden_states = residual + hidden_states
++            # Self Attention
++            hidden_states, self_attn_weights, present_key_value = self.self_attn(
++                hidden_states=hidden_states,
++                attention_mask=attention_mask,
++                position_ids=position_ids,
++                past_key_value=past_key_value,
++                output_attentions=output_attentions,
++                use_cache=use_cache,
++                cache_position=cache_position,
++                position_embeddings=position_embeddings,
++            )
++            hidden_states = residual + hidden_states
+ 
+-        # Fully Connected
+-        residual = hidden_states
+-        hidden_states = self.post_attention_layernorm(hidden_states)
+-        hidden_states = self.mlp(hidden_states)
+-        hidden_states = residual + hidden_states
++        if not self.mask_mlp:
++            # Fully Connected
++            residual = hidden_states
++            hidden_states = self.post_attention_layernorm(hidden_states)
++            hidden_states = self.mlp(hidden_states)
++            hidden_states = residual + hidden_states
+ 
+         outputs = (hidden_states,)
+ 
+@@ -723,6 +729,8 @@ class Qwen2DecoderLayer(nn.Module):
+             outputs += (self_attn_weights,)
+ 
+         if use_cache:
++            if self.mask_attn:
++                past_key_value.update(None, None, self.self_attn.layer_idx)
+             outputs += (present_key_value,)
+ 
+         return outputs
+@@ -999,7 +1007,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
+             all_hidden_states += (hidden_states,)
+ 
+         next_cache = next_decoder_cache if use_cache else None
+-        if return_legacy_cache:
++        if return_legacy_cache and next_cache is not None:
+             next_cache = next_cache.to_legacy_cache()
+ 
+         if not return_dict:
