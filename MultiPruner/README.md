@@ -12,6 +12,7 @@ Please refer to our paper for more details.
 ## Supported Models 🤗
 
 - **Llama**
+  - [x] [meta-llama/Llama-3.2-3B](https://huggingface.co/meta-llama/Llama-3.2-3B)
   - [x] [meta-llama/Llama-3.1-8B](https://huggingface.co/meta-llama/Llama-3.1-8B)
   - [x] [meta-llama/Meta-Llama-3-8B](https://huggingface.co/meta-llama/Meta-Llama-3-8B)
   - [x] [meta-llama/Llama-2-7b-hf](https://huggingface.co/meta-llama/Llama-2-7b-hf)
@@ -113,6 +114,14 @@ python recovery/finetune.py \
 
 We have provided some running commands (including pruning and recovery-tuning) and pruning configurations of MultiPruner, which can be found [here](./results).
 
+#### Llama-3.2-3B
+
+| Method           | Pruning Ratio | Acc. (%) | WikiText2 PPL |
+|------------------|---------------|----------|---------------|
+| Dense            | /             | 67.67    | 7.81          |
+| BlockPruner      | 9%            | 62.31    | 13.07         |
+| **MultiPruner**  | 9%            | 64.04    | 10.46         |
+
 #### Llama-3.1-8B
 
 | Method           | Pruning Ratio | Acc. (%) | WikiText2 PPL |
@@ -123,6 +132,16 @@ We have provided some running commands (including pruning and recovery-tuning) a
 | BlockPruner      | 20%           | 59.08    | 15.37         |
 | **MultiPruner**  | 20%           | 63.07    | 13.86         |
 
+Compared to [LLM-Pruner](https://arxiv.org/abs/2305.11627) (Pruning ratio: ~17%):
+
+| Method                    | WikiText2 PPL (Seq Len: 2048) |
+|---------------------------|-------------------------------|
+| Dense                     | 6.24                          |
+| BlockPruner               | 13.78                         |
+| LLM-Pruner (L2)           | 49.09                         |
+| LLM-Pruner (Taylor)       | 12.71                         |
+| **MultiPruner** (10:90:0) | **11.64**                     |
+
 #### Meta-Llama-3-8B
 
 | Method           | Pruning Ratio | Acc. (%) | WikiText2 PPL |
@@ -132,6 +151,16 @@ We have provided some running commands (including pruning and recovery-tuning) a
 | **MultiPruner**  | 10%           | 69.03    | 8.19          |
 | BlockPruner      | 20%           | 57.59    | 22.36         |
 | **MultiPruner**  | 20%           | 63.02    | 16.01         |
+
+Compared to [LLM-Pruner](https://arxiv.org/abs/2305.11627) (Pruning ratio: ~17%):
+
+| Method                     | WikiText2 PPL (Seq Len: 2048) |
+|----------------------------|-------------------------------|
+| Dense                      | 6.14                          |
+| BlockPruner                | 16.15                         |
+| LLM-Pruner (L2)            | 34.13                         |
+| LLM-Pruner (Taylor)        | 12.86                         |
+| **MultiPruner** (10:90:0)  | **11.11**                     |
 
 #### Qwen2.5-7B
 

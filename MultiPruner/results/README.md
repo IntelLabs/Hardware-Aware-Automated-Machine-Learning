@@ -4,6 +4,25 @@ Following are the commands of MultiPruner on various LLMs.
 
 ### Llama
 
+#### Llama-3.2-3B
+
+```bash
+python run_multipruner.py \
+  --model_path meta-llama/Llama-3.2-3B \
+  --output_path <path to pruning results> \
+  --weight_reorder \
+  --do_prune \
+  --target_ratio <pruning ratio> \
+  --pruning_distribution 10:90:0 \
+  --mlp_channel_group_size 768 \
+  --attn_channel_group_size 384 \
+  --importance_metric ppl \
+  --calibration_dataset alpaca \
+  --num_calibration_samples_block 256 \
+  --num_calibration_samples_width 128 \
+  --do_eval
+```
+
 #### Llama-3.1-8B
 
 ```bash
