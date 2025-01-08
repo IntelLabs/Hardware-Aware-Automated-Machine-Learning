@@ -36,7 +36,7 @@ class QuantizedDenseLinear(torch.nn.Linear):
         factory_kwargs = {'device': device, 'dtype': dtype}
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = Parameter(torch.empty((out_features, in_features), **factory_kwargs), requires_grad=False) # AHMED modified here, adding requires_grad=False
+        self.weight = Parameter(torch.empty((out_features, in_features), **factory_kwargs), requires_grad=False)
         self.w_scales = nn.Parameter(torch.empty((out_features), dtype=torch.bfloat16, requires_grad=False))
 
         if bias:

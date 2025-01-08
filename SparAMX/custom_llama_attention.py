@@ -18,8 +18,7 @@ from layer.dense_linear import DenseLinear
 
 
 # SAVED_FILES_DIR = "saved_kv_state_files_per_layer_amx_new/per_head"
-SAVED_FILES_DIR = "saved_kv_state_files_per_layer_amx_right_keys/per_layer"
-TILE_ROW_SIZE = 32
+SAVED_FILES_DIR = "saved_kv_state_files_per_layer_amx_new/per_layer"
 
 def sparsify(vals, prune_percentage):
     if prune_percentage == 0:
@@ -85,62 +84,18 @@ class CustomLlamaAttention(LlamaAttention):
         }
 
     def load_computers(self, ctx_length):
-        # Disabled for now. # TODO: Enable this.
-        return
         if self.use_custom_k and os.path.exists(f"{saved_file_prefix(self.layer_idx, self.k_pruning, ctx_length, self.kernel)}_k.pt"):
             self.key_computer = self.kernel.load_from_file(f"{saved_file_prefix(self.layer_idx, self.k_pruning, ctx_length, self.kernel)}_k.pt")
         if self.use_custom_v and os.path.exists(f"{saved_file_prefix(self.layer_idx, self.v_pruning, ctx_length, self.kernel)}_v.pt"):
             self.value_computer = self.kernel.load_from_file(f"{saved_file_prefix(self.layer_idx, self.v_pruning, ctx_length, self.kernel)}_v.pt")
 
-
-    def reset_computers(self):
-        self.key_computer = None
-        self.value_computer = None
-
-    def prepare_extra_keys(self, extra_keys):
-        res = extra_keys.clone()
-        res = res.view(res.shape[0], res.shape[1], res.shape[2], -1, 2).transpose(2,3).reshape(extra_keys.shape[0], extra_keys.shape[1], extra_keys.shape[3], extra_keys.shape[2]).to(torch.bfloat16).contiguous()
-        return res
-    
-    def prepare_extra_values(self, extra_values):
-        # Pad the values to have full tiles
-        # A full tile has TILE_SIZE rows
-        # import pdb; pdb.set_trace()
-        res = extra_values.clone() # TODO: Can we optimize this?
-        if extra_values.size(2) % TILE_ROW_SIZE != 0:
-            res = F.pad(extra_values, (0, 0, 0, TILE_ROW_SIZE - extra_values.size(2) % TILE_ROW_SIZE))
-        res = res.transpose(2, 3)
-        # reorder elements so that each word of the sequence is in the same row
-        batch, heads, dim, seq_len = res.shape
-            
-        # First reshape maintaining the original sequence dimension
-        res = res.view(batch, heads, dim, seq_len // 2, 2)
-        
-        # Transpose the sequence and dim//2 dimensions
-        res = res.permute(0, 1, 3, 2, 4)
-        
-        # Final reshape
-        res = res.reshape(batch, heads, seq_len, dim)
-        
-        # Convert to bfloat16 and ensure contiguous memory layout
-        res = res.to(torch.bfloat16).contiguous()
-        return res
-
-
     def update_cache(self, key_states, value_states):
-        if key_states.shape[2] > 1:
-            return key_states, value_states
-
-        # breakpoint()
-        prepared_key_states = key_states
         # Append key_states and value_states to current cache
         if self.cached_key_states.numel() == 0:
-            self.cached_key_states = prepared_key_states
-            # self.cached_key_states = prepared_key_states
+            self.cached_key_states = key_states
             self.cached_value_states = value_states
         else:
-            # breakpoint()
-            self.cached_key_states = torch.cat((self.cached_key_states, prepared_key_states), dim=2)
+            self.cached_key_states = torch.cat((self.cached_key_states, key_states), dim=2)
             self.cached_value_states = torch.cat((self.cached_value_states, value_states), dim=2)
         
         return self.cached_key_states, self.cached_value_states
@@ -162,8 +117,6 @@ class CustomLlamaAttention(LlamaAttention):
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         
-        # if self.layer_idx == 0:
-        #     breakpoint()
         # all_function_start = time.time()
         bsz, q_len, _ = hidden_states.size()
 
@@ -212,35 +165,19 @@ class CustomLlamaAttention(LlamaAttention):
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
         # time_3_2_end = time.time()
 
-
-        if hidden_states.shape[1] > 1:
-            # We're in the prefill stage.
-            key_states = sparsify(key_states, self.k_pruning)
-            value_states = sparsify(value_states, self.v_pruning)
-        else:
-            # We're in the decode stage.
-            if self.use_custom_k or self.use_custom_v:
-                key_states_custom, value_states_custom = self.update_cache(key_states, value_states)
-            if self.use_custom_k:
-                key_states_custom = repeat_kv(key_states_custom, self.num_key_value_groups)
-            if self.use_custom_v:
-                value_states_custom = repeat_kv(value_states_custom, self.num_key_value_groups)
-    
         # time_3_3_start = time.time()
         # import pdb; pdb.set_trace()
-        if not(self.use_custom_k or self.use_custom_v) or hidden_states.shape[1] > 1:
-            if past_key_value is not None:
-                # sin and cos are specific to RoPE models; cache_position needed for the static cache
-                cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
-                key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
-
+        if past_key_value is not None:
+            # sin and cos are specific to RoPE models; cache_position needed for the static cache
+            cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
+            key_states, value_states = self.update_cache(key_states, value_states)
+            # key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
         # time_3_3_end = time.time()
 
         # print(f"Current key_states: {key_states.shape}, current value_states: {value_states.shape}")
         # time_3_4_start = time.time()
-
-            key_states = repeat_kv(key_states, self.num_key_value_groups)
-            value_states = repeat_kv(value_states, self.num_key_value_groups)
+        key_states = repeat_kv(key_states, self.num_key_value_groups)
+        value_states = repeat_kv(value_states, self.num_key_value_groups)
         # time_3_4_end = time.time()
         # time_3_end = time.time()
         # print("Time taken for time 3_1: ", time_3_1_end - time_3_1_start)
@@ -251,29 +188,17 @@ class CustomLlamaAttention(LlamaAttention):
         # import pdb; pdb.set_trace()
         # attn_weights_start = time.time()
         if self.use_custom_k:
-            # if self.layer_idx == 0:
-            #     breakpoint()
             if self.key_computer is None:
-                assert(key_states.shape[2] > 1)
-                # key_states = sparsify(key_states, self.k_pruning)
+                key_states = sparsify(key_states, self.k_pruning)
                 self.key_computer = self.kernel.from_batched_weights(key_states.contiguous())
                 self.key_computer.save_state(f"{saved_file_prefix(self.layer_idx, self.k_pruning, q_len, self.kernel)}_k.pt")
 
-                assert(self.cached_key_states.numel() == 0)
-                attn_weights =  self.key_computer.matmul(query_states.contiguous()) / math.sqrt(self.head_dim)
-            else:
-                # assert(self.cached_key_states.numel() > 0) # Can't do that assert because the first time it would be empty.
-                # attn_weights = self.key_computer.matmul(query_states.contiguous(), key_states.transpose(2,3), is_key=True) / math.sqrt(self.head_dim)
-                if hidden_states.shape[1] > 1:
-                    import pdb; pdb.set_trace()
-                attn_weights = self.key_computer.matmul(query_states.contiguous(), self.prepare_extra_keys(key_states_custom), is_key=True) / math.sqrt(self.head_dim)
+            attn_weights = self.key_computer.matmul(query_states.contiguous()) / math.sqrt(self.head_dim)
         else:
             attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
-        
-        # if self.layer_idx == 0:
-        #     breakpoint()
         # attn_weights_end = time.time()
         # attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+
 
         # time_4_start = time.time()
         if attention_mask is not None:  # no matter the length, we just slice it
@@ -290,35 +215,19 @@ class CustomLlamaAttention(LlamaAttention):
         # attn_otuput_start = time.time()
         if self.use_custom_v:
             if self.value_computer is None:
-                assert(value_states.shape[2] > 1)
-                # value_states = sparsify(value_states, self.v_pruning)
+                value_states = sparsify(value_states, self.v_pruning)
                 self.value_computer = self.kernel.from_batched_weights(value_states.contiguous().transpose(2, 3))
                 self.value_computer.save_state(f"{saved_file_prefix(self.layer_idx, self.v_pruning, q_len, self.kernel)}_v.pt")
 
-                assert(self.cached_value_states.numel() == 0)
-                attn_output = self.value_computer.matmul(attn_weights.contiguous())
-            else:
-                # Pad attn_weights to be multiple of TILE_ROW_SIZE on last dimension
-                original_size = attn_weights.size(-1)
-                padding_size = (TILE_ROW_SIZE - original_size % TILE_ROW_SIZE) % TILE_ROW_SIZE
-                if padding_size > 0:
-                    padded_attn_weights = F.pad(attn_weights, (0, padding_size))
-                else:
-                    padded_attn_weights = attn_weights
-                    
-                attn_output = self.value_computer.matmul(padded_attn_weights.contiguous(), self.prepare_extra_values(value_states_custom), is_key=False)
+            attn_output = self.value_computer.matmul(attn_weights.contiguous())
         else:
             # import pdb; pdb.set_trace()
-            # attn_output = torch.matmul(attn_weights, value_states_2[:, :, :attn_weights.size(-1), :])
-            attn_output = torch.matmul(attn_weights, value_states)
-            
+            attn_output = torch.matmul(attn_weights, value_states[:, :, :attn_weights.size(-1), :])
         # attn_output_end = time.time()
         attn_output = attn_output.to(torch.bfloat16)
         # attn_output = torch.matmul(attn_weights, value_states[:, :, :attn_weights.size(-1), :])
         # import pdb; pdb.set_trace()
 
-        # if self.layer_idx == 0:
-        #     import pdb; pdb.set_trace()
 
         # time_5_start = time.time()
         if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
@@ -359,9 +268,6 @@ class CustomLlamaAttention(LlamaAttention):
         # self.timing_stats['total'] += all_function_end - all_function_start
         # self.timing_stats['call_count'] += 1
 
-        # if self.layer_idx % 10 == 0:
-        #     print(f"Layer {self.layer_idx}: {attn_output}")
-        #     import pdb; pdb.set_trace()
         return attn_output, attn_weights, past_key_value
 
     def print_timing_stats(self):
