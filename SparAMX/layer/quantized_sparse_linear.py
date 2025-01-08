@@ -52,7 +52,7 @@ class QuantizedSparseLinear(torch.nn.Linear):
         factory_kwargs = {'device': device, 'dtype': dtype}
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = Parameter(torch.empty((out_features, in_features), **factory_kwargs), requires_grad=False) # AHMED modified here, adding requires_grad=False
+        self.weight = Parameter(torch.empty((out_features, in_features), **factory_kwargs), requires_grad=False)
         if bias:
             self.bias = Parameter(torch.empty(out_features, **factory_kwargs))
         else:
