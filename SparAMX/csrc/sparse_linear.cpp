@@ -168,103 +168,6 @@ __m512i parallel_prefix_sum_32(__m512i v) {
     return _mm512_add_epi32(sum, _mm512_alignr_epi32(sum, _mm512_setzero_si512(), 8));
 }
 
-void compute_out_cols_results(
-  const torch::Tensor& input,
-  const torch::Tensor& weight,
-  const int out_cols, // Number of extra cols to compute.
-  const int tile_out_rows, // original tile_out_rows.
-  const int tile_inner_dim, // original tile_inner_dim.
-  const int out_row_i, // current out_row_i.
-  const bool extra_row, 
-  float* output_ptr, 
-  const int start_col = 0 // Beginning of extra col in output
-) {
-  // std::cout << "Compute out cols called\n";
-  __tilecfg tile_data = {0};
-  const int num_chunks_2 = (out_cols + MAX_OUT_COLS - 1) / MAX_OUT_COLS; // Number of tiles to compute.
-  // std::cout << "Num Chunks 2: " << num_chunks_2 << ", out_cols: " << out_cols << "\n";
-  at::parallel_for(0, num_chunks_2, 1, [&](int start_c, int end_c) {
-    // std::cout << "Thread ID: " << omp_get_thread_num() << std::endl;
-    for (int out_col_i = start_c; out_col_i < end_c; out_col_i+=1) {
-      // std::cout << "Out Col I: " << out_col_i << "\n";
-      int tile_out_cols = std::min(out_cols - out_col_i * MAX_OUT_COLS, MAX_OUT_COLS);
-      init_tile_config (&tile_data, tile_out_rows, tile_inner_dim, tile_out_cols);
-      #ifdef VERBOSE
-        std::cout << "Computing Tile Pair: (" << out_row_i << "," << out_col_i << ")\n";
-        std::cout << ("Loading res into AMX registers\n");
-      #endif
-
-        const int inner_dim = input.sizes()[2];
-        const bool extra_col = false; //(out_col_i + 1 < end_c); // TODO: Fix this to be more efficient. Don't forget to change the increment to be +2 rather than +1.
-
-        for (int inner_dim_i = 0; inner_dim_i < (inner_dim + MAX_INNER_DIM - 1) / MAX_INNER_DIM; inner_dim_i++) {
-          #ifdef VERBOSE
-            std::cout << "Computing Tile: (" << out_row_i << "," << out_col_i << ")->" << inner_dim_i << "\n";
-
-            std::cout << ("Loading Elements into AMX registers\n");
-
-            // Load tile rows from memory
-            std::cout << ("Loading src1 into AMX registers\n");
-          #endif
-
-            _tile_loadd (4, input.data_ptr() + 2 * (out_row_i * tile_out_rows * inner_dim + inner_dim_i * tile_inner_dim), inner_dim * 2);
-
-            if (extra_row) {
-              _tile_loadd (5, input.data_ptr() + 2 * ((out_row_i + 1) * tile_out_rows * inner_dim + inner_dim_i * tile_inner_dim), inner_dim * 2);
-            }
-          #ifdef VERBOSE
-            std::cout << ("Loading src2 into AMX registers\n");
-          #endif
-            // out_col_i is multiplied by MAX_OUT_COLS as that's the number of all previous tiles. The current tile might be smaller but then there will never
-            // be a next out_col_i. So, all previous out_col_i(s) had full tiles.
-            _tile_loadd (6, weight.data_ptr() + 2 * (inner_dim_i * tile_inner_dim / 2 * out_cols * 2 + out_col_i * MAX_OUT_COLS * 2), (out_cols) * 2 * 2 );
-
-            if (extra_col) {
-            _tile_loadd (7, weight.data_ptr() + 2 * (inner_dim_i * tile_inner_dim / 2 * out_cols * 2 + (out_col_i+1) * MAX_OUT_COLS * 2), (out_cols) * 2 * 2 );
-            }
-          #ifdef VERBOSE
-            std::cout << ("Performing the computation\n");
-          #endif
-
-            // Compute dot-product of bytes in tiles
-            _tile_dpbf16ps (0, 4, 6);
-            _tile_stored (0, output_ptr + out_row_i * tile_out_rows * (out_cols + start_col) + start_col + out_col_i * MAX_OUT_COLS, ((out_cols + start_col)) * 4);
-            // std::cout << "Stored something\n";
-            if (extra_col) {
-              _tile_dpbf16ps (1, 4, 7);
-              _tile_stored (1, output_ptr + out_row_i * tile_out_rows * (out_cols + start_col) + start_col + (out_col_i + 1) * MAX_OUT_COLS, ((out_cols + start_col)) * 4);
-            }
-            if (extra_row) {
-              _tile_dpbf16ps (2, 5, 6);
-              _tile_stored (2, output_ptr + (out_row_i + 1) * tile_out_rows * (out_cols + start_col) + start_col + out_col_i * MAX_OUT_COLS, ((out_cols + start_col)) * 4);              
-            }
-            if (extra_col && extra_row) {
-              _tile_dpbf16ps (3, 5, 7);
-              _tile_stored (3, output_ptr + (out_row_i + 1) * tile_out_rows * (out_cols + start_col) + start_col + (out_col_i+ 1) * MAX_OUT_COLS, ((out_cols + start_col)) * 4);
-            }
-            // std::cout << "Stored something\n";
-
-        }
-        #ifdef VERBOSE
-          std::cout << ("Storing the result in memory\n");
-        #endif
-        // Store the tile data to memory
-
-        #ifdef VERBOSE
-          std::cout << "Result After: \n";
-
-          for (int i = 0; i < out_rows; i++) {
-              for (int j = 0; j < out_cols; j++) {
-                  std::cout << " " << (float) * (res + i * out_cols + j);
-              }
-              std::cout << "\n";
-          }
-        #endif
-    }
-  });
-}
-
-
 // intent is to create an alternative kernel for linear layer by using torch C API
 // just to demonstrate the capability of torch custom op extension
 // we will not implement backward since we focus of inference
@@ -281,8 +184,6 @@ void sparse_linear_forward(
     const int            out_cols,
     torch::Tensor&       output,
     const int            weight_values_start = 0,
-    const c10::optional<torch::Tensor>& extra_weights = c10::nullopt,
-    const bool           is_keys = false,
     const c10::optional<torch::Tensor>& bias = c10::nullopt) {
 
     float* output_ptr = output.data_ptr<float>();
@@ -298,36 +199,16 @@ void sparse_linear_forward(
     #endif
   const int out_rows = input.sizes()[0] * input.sizes()[1];
   const int inner_dim = input.sizes()[2];
-  // This one is used for the first loop before handling the extra weights if any.
-  int inner_dim_first_loop;
-  if (!is_keys && extra_weights.has_value()) {
-    inner_dim_first_loop = input.sizes()[2] - extra_weights.value().sizes()[0];
-  } else {
-    inner_dim_first_loop = input.sizes()[2];
-  }
-
-  // std::cout << "Inner dim first loop: " << inner_dim_first_loop << "\n";
-  // std::cout << "Extra Weights Size: " << extra_weights.value().sizes() << "\n";
-
-  const int extra_end_id = extra_weights.has_value() ? (extra_weights.value().sizes()[0] + MAX_INNER_DIM - 1) / MAX_INNER_DIM : 0;
-
   // int out_cols = (weight_metadata.sizes()[1] + 1) / 2;
   // std::cout << "Out Cols: " << out_cols << "\n";
-  // const int res_size = (out_rows * out_cols);
+  const int res_size = (out_rows * out_cols);
   // std::cout << "Sometimes I reach here.";
-  // std::unique_ptr<AlignedMemory> res = std::make_unique<AlignedMemory>(res_size * 4, CACHE_LINE_SIZE);
+  std::unique_ptr<AlignedMemory> res = std::make_unique<AlignedMemory>(res_size * 4, CACHE_LINE_SIZE);
   // float * res = new float[res_size]();
 
   //  int weight_index;
    
   const int num_inner_threads = weight_values_is.sizes()[0];
-
-  int extra_out_cols = 0;
-  // std::cout <<  "is_keys: " << is_keys << "Extra Weights: " << extra_weights.has_value() << "\n";
-  // std::cout << "Extra Weights Sizes: " << extra_weights.value().sizes()[1] << "\n";
-  if (is_keys && extra_weights.has_value()) {
-    extra_out_cols = extra_weights.value().sizes()[1];
-  }
   // const int start_t = 0, end_t = num_inner_threads;
 
   //  short weight[MAX_OUT_ROWS * MAX_INNER_DIM] = {0};
@@ -353,17 +234,17 @@ void sparse_linear_forward(
     // at::parallel_for(0, num_chunks, 0, [&](int start_r, int end_r) {
       for (int out_row_i = start_r; out_row_i < end_r; out_row_i+=2) {
         // weight_index = 0;
-        const int tile_out_rows = std::min(out_rows, MAX_OUT_ROWS);
-        const int tile_inner_dim = std::min(inner_dim, MAX_INNER_DIM);
-        const int tile_out_cols = std::min(out_cols, MAX_OUT_COLS);
-        const bool extra_row = (out_row_i + 1 < end_r);
-
         const int start_t = 0, end_t = num_inner_threads;
         at::parallel_for(0, num_inner_threads, 1, [&](int start_t, int end_t) {
           // #pragma omp parallel for num_threads(num_inner_threads) schedule(static) 
           // int cur_weight_i = 0;
           // #pragma omp parallel for num_threads(1)
           for (int t_id = start_t; t_id < end_t; t_id++) {
+
+            const int tile_out_rows = std::min(out_rows, MAX_OUT_ROWS);
+            const int tile_inner_dim = std::min(inner_dim, MAX_INNER_DIM);
+            const int tile_out_cols = std::min(out_cols, MAX_OUT_COLS);
+
             const bool grouped_col_tiles = ((out_cols > MAX_OUT_COLS) && (out_cols * 2 / num_inner_threads) > (MAX_OUT_COLS * 2));
 
             const int start_ir = 0, end_ir = tile_inner_dim / 2;
@@ -399,16 +280,16 @@ void sparse_linear_forward(
              int weight_index_bias;
               if (grouped_col_tiles) {
                 // The index equation would be different as each 2 col tiles are placed consecutively.
-                weight_index_bias = (tile_inner_dim * out_col_i * ((inner_dim_first_loop + tile_inner_dim - 1) / tile_inner_dim / 2));
+                weight_index_bias = (tile_inner_dim * out_col_i * ((inner_dim + tile_inner_dim - 1) / tile_inner_dim / 2));
               } else {
-                weight_index_bias = (tile_inner_dim / 2 * (out_col_i) * ((inner_dim_first_loop + tile_inner_dim - 1) / tile_inner_dim));
+                weight_index_bias = (tile_inner_dim / 2 * (out_col_i) * ((inner_dim + tile_inner_dim - 1) / tile_inner_dim));
               }
 
             #ifdef TIMEDEBUG
               start = clock();
             #endif
             
-            const bool extra_col = (out_col_i + 1 < end_c);
+            const bool extra_row = (out_row_i + 1 < end_r), extra_col = (out_col_i + 1 < end_c);
               #ifdef TIMEDEBUG
                 end = clock();
                 std::cout << "Time taken to init tile config: " << ((double)(end - start)) / CUSTOM_CLOCKS_PER_SEC << "\n";
@@ -445,9 +326,8 @@ void sparse_linear_forward(
               }
             #endif
               // Parallelize on inner dimension.
-              const int start_id = 0, end_id = (inner_dim_first_loop + tile_inner_dim - 1) / tile_inner_dim;
-              // std::cout << "End ID: " << end_id << "\n";
-              // at::parallel_for(0, (inner_dim_first_loop + tile_inner_dim - 1) / tile_inner_dim, 0, [&](int start_id, int end_id) {
+              const int start_id = 0, end_id = (inner_dim + tile_inner_dim - 1) / tile_inner_dim;
+              // at::parallel_for(0, (inner_dim + tile_inner_dim - 1) / tile_inner_dim, 0, [&](int start_id, int end_id) {
               for (int inner_dim_i = start_id; inner_dim_i < end_id; inner_dim_i++) {
 
                 #ifdef VERBOSE
@@ -607,32 +487,6 @@ void sparse_linear_forward(
                 #endif     
               }
               
-              if (!is_keys && extra_weights.has_value()) {
-                for (int inner_dim_i = 0; inner_dim_i < extra_end_id; inner_dim_i+= 1) {
-                  _tile_loadd (4, input.data_ptr() + 2 * (out_row_i * tile_out_rows * inner_dim + end_id * tile_inner_dim + inner_dim_i * MAX_INNER_DIM), inner_dim * 2);
-                  if (extra_row) {
-                    _tile_loadd (5, input.data_ptr() + 2 * ((out_row_i + 1) * tile_out_rows * inner_dim + end_id * tile_inner_dim + inner_dim_i * MAX_INNER_DIM), inner_dim * 2);
-                  }
-                  
-                  _tile_loadd (6, extra_weights.value().data_ptr() + 2 * (inner_dim_i * MAX_INNER_DIM / 2 * out_cols * 2 + (out_col_i) * tile_out_cols * 2), (out_cols) * 2 * 2);
-                  if (extra_col) {
-                    _tile_loadd (7, extra_weights.value().data_ptr() + 2 * (inner_dim_i * MAX_INNER_DIM / 2 * out_cols * 2 + (out_col_i + 1) * tile_out_cols * 2), (out_cols) * 2 * 2);
-                  }
-                  // _tile_zero(6);
-                  // _tile_zero(7);
-                  _tile_dpbf16ps (0, 4, 6);
-                  if (extra_col) {
-                    _tile_dpbf16ps (1, 4, 7);
-                  }
-                  if (extra_row) {
-                    _tile_dpbf16ps (2, 5, 6);
-                  }
-                  if (extra_col && extra_row) {
-                    _tile_dpbf16ps (3, 5, 7);
-                  }
-                }
-              }
-              
               // }); // Parallelize on inner dimension.
               #ifdef VERBOSE
                 std::cout << ("Storing the result in memory\n");
@@ -641,15 +495,16 @@ void sparse_linear_forward(
               #ifdef TIMEDEBUG
                 start = clock();
               #endif
-              // std::cout << "Extra out cols: " << extra_out_cols << "\n";
+
+
               // Store the tile data to memory
-              _tile_stored (0, output_ptr + out_row_i * tile_out_rows * (out_cols + extra_out_cols) + out_col_i * tile_out_cols, ((out_cols + extra_out_cols)) * 4);
+              _tile_stored (0, output_ptr + out_row_i * tile_out_rows * out_cols + out_col_i * tile_out_cols, (out_cols) * 4);
               if (extra_col)
-                _tile_stored (1, output_ptr + out_row_i * tile_out_rows * (out_cols + extra_out_cols) + (out_col_i+1) * tile_out_cols, ((out_cols + extra_out_cols)) * 4);
+                _tile_stored (1, output_ptr + out_row_i * tile_out_rows * out_cols + (out_col_i+1) * tile_out_cols, (out_cols) * 4);
               if (extra_row)
-                _tile_stored (2, output_ptr + (out_row_i+1) * tile_out_rows * (out_cols + extra_out_cols) + out_col_i * tile_out_cols, ((out_cols + extra_out_cols)) * 4);
+                _tile_stored (2, output_ptr + (out_row_i+1) * tile_out_rows * out_cols + out_col_i * tile_out_cols, (out_cols) * 4);
               if (extra_col && extra_row)
-                _tile_stored (3, output_ptr + (out_row_i+1) * tile_out_rows * (out_cols + extra_out_cols) + (out_col_i+1) * tile_out_cols, ((out_cols + extra_out_cols)) * 4);
+                _tile_stored (3, output_ptr + (out_row_i+1) * tile_out_rows * out_cols + (out_col_i+1) * tile_out_cols, (out_cols) * 4);
 
               #ifdef TIMEDEBUG
                     end = clock();
@@ -666,25 +521,16 @@ void sparse_linear_forward(
                 }
               #endif
         }
-
       // }
         // );
   }
         }); // Number of threads.
-        
-        // std::cout << "Extra Weights: " << extra_weights.has_value() << "\n";
-        if (is_keys && extra_weights.has_value()) {
-          int extra_cols = extra_weights.value().sizes()[1];  // Use .value() to access the tensor
-          compute_out_cols_results(input, extra_weights.value(), extra_cols, tile_out_rows, tile_inner_dim, out_row_i, extra_row, output_ptr, out_cols);
-        }
     }
     // });
 
    // Release the tile configuration to return to the init state, 
    // which releases all storage it currently holds
-  //  std::cout << "Before tile release\n";
    _tile_release ();
-  //  std::cout << "After tile release\n";
     // fused op is marginally faster
     // auto t_res = torch::from_blob(res->get(), {input.sizes()[0], input.sizes()[1], out_cols}, torch::kFloat32).to(torch::kBFloat16);
     // return t_res;
@@ -697,31 +543,20 @@ torch::Tensor sparse_matmul(
     const torch::Tensor& weight_values_bs,
     const torch::Tensor& weight_values_is,
     const int            out_cols,
-    const c10::optional<torch::Tensor>& extra_weights = c10::nullopt,
-    const bool           is_keys = false,
     const c10::optional<torch::Tensor>& bias = c10::nullopt) {
       const int batch_size = input.sizes()[0];
       const int num_heads = input.sizes()[1];
-      int extra_cols = 0;
-      if (is_keys && extra_weights.has_value()) {
-        extra_cols = extra_weights.value().sizes()[3];
-        // std::cout << "Extra cols: " << extra_cols << "\n";
-      }
-      auto out = torch::empty({batch_size, num_heads, input.sizes()[2], out_cols + extra_cols}, torch::TensorOptions().dtype(torch::kFloat32).memory_format(torch::MemoryFormat::Contiguous));      
+      auto out = torch::empty({batch_size, num_heads, input.sizes()[2], out_cols}, torch::TensorOptions().dtype(torch::kFloat32).memory_format(torch::MemoryFormat::Contiguous));      
       float* out_ptr = static_cast<float*>(out.data_ptr());
 
       for (int batch_i = 0; batch_i < batch_size; batch_i++) {
         at::parallel_for(0, num_heads, 0, [&](int start_h, int end_h) {
           for (int head_i = start_h; head_i < end_h; head_i++) {
             float* current_out_ptr = out_ptr + 
-                (batch_i * num_heads * input.sizes()[2] * (out_cols + extra_cols) + 
-                head_i * input.sizes()[2] * (out_cols + extra_cols));
-            auto out_tensor = torch::from_blob(current_out_ptr, {input.sizes()[2], out_cols + extra_cols}, torch::kFloat32);
-            c10::optional<torch::Tensor> extra_weights_cur = c10::nullopt;
-            if (extra_weights.has_value()) {
-              extra_weights_cur = extra_weights.value()[batch_i][head_i];
-            }
-            sparse_linear_forward(input[batch_i][head_i].unsqueeze(0), weight_metadata[batch_i][head_i], weight_values, weight_values_is[batch_i][head_i], out_cols, out_tensor, weight_values_bs[batch_i][head_i].item<int>(), extra_weights_cur, is_keys, bias);
+                (batch_i * num_heads * input.sizes()[2] * out_cols + 
+                head_i * input.sizes()[2] * out_cols);
+            auto out_tensor = torch::from_blob(current_out_ptr, {input.sizes()[2], out_cols}, torch::kFloat32);
+            sparse_linear_forward(input[batch_i][head_i].unsqueeze(0), weight_metadata[batch_i][head_i], weight_values, weight_values_is[batch_i][head_i], out_cols, out_tensor, weight_values_bs[batch_i][head_i].item<int>(), bias);
           }
         }); // Head parallelization.
       }
@@ -732,8 +567,8 @@ torch::Tensor sparse_matmul(
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("forward", &sparse_linear_forward, "sparse linear forward",
-  pybind11::arg("input"), pybind11::arg("weight_metadata"), pybind11::arg("weight_values"), pybind11::arg("weight_values_is"), pybind11::arg("out_cols"), pybind11::arg("output_ptr"), pybind11::arg("weight_values_start") = 0, pybind11::arg("extra_weights") = nullptr, pybind11::arg("is_keys") = false, pybind11::arg("bias") = nullptr);
+  pybind11::arg("input"), pybind11::arg("weight_metadata"), pybind11::arg("weight_values"), pybind11::arg("weight_values_is"), pybind11::arg("out_cols"), pybind11::arg("output_ptr"), pybind11::arg("weight_values_start") = 0, pybind11::arg("bias") = nullptr);
 
   m.def("matmul", &sparse_matmul, "sparse matmul",
-  pybind11::arg("input"), pybind11::arg("weight_metadata"), pybind11::arg("weight_values"), pybind11::arg("weight_values_bs") ,pybind11::arg("weight_values_is"), pybind11::arg("out_cols"), pybind11::arg("extra_weights") = nullptr, pybind11::arg("is_keys") = false, pybind11::arg("bias") = nullptr);
+  pybind11::arg("input"), pybind11::arg("weight_metadata"), pybind11::arg("weight_values"), pybind11::arg("weight_values_bs") ,pybind11::arg("weight_values_is"), pybind11::arg("out_cols"), pybind11::arg("bias") = nullptr);
 }

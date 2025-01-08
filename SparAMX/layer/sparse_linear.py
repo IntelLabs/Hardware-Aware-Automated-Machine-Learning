@@ -175,22 +175,19 @@ class SparseLinear(nn.Linear):
             sparse_linear.forward(input, self.weight_metadata, self.weight_values, self.weight_values_is, self.out_cols, output)
         return output.to(torch.bfloat16)
 
-    def matmul(self, mat, extra_weights = None, is_key=False):
+    def matmul(self, mat):
         # import pdb; pdb.set_trace()
         # with torch.autograd.profiler.emit_itt():
             # print(self.weight_values.size())
-        # import pdb; pdb.set_trace();
-        # breakpoint()
-        return sparse_linear.matmul(mat, self.weight_metadata, self.weight_values, self.weight_values_bs, self.weight_values_is, self.out_cols, extra_weights, is_key, self.bias)
+        return sparse_linear.matmul(mat, self.weight_metadata, self.weight_values, self.weight_values_bs, self.weight_values_is, self.out_cols, self.bias)
 
     @classmethod
-    def batched_matmul(cls, mat1, mat2, extra_weights = None, is_key=False):
+    def batched_matmul(cls, mat1, mat2):
         """Performs Batched Matrix Multiplication using the sparse kernel"""
         input = mat1
         weight = mat2.transpose(2, 3)
-        # import pdb; pdb.set_trace()
         computer = cls.from_batched_weights(weight)
-        output = computer.matmul(input, extra_weights, is_key)
+        output = computer.matmul(input)
         return output
         batch_size, num_heads, out_rows, inner_dim = mat1.size()
         res = torch.empty(batch_size, num_heads, out_rows, mat2.size(-1), device=mat1.device, dtype=mat1.dtype)
@@ -206,8 +203,7 @@ class SparseLinear(nn.Linear):
     @classmethod
     def from_batched_weights(cls, orig_weights, num_threads=32, shallow=False):
         # import pdb; pdb.set_trace()
-        num_threads = min(num_threads, math.ceil(orig_weights.shape[2] / 32.))
-        print(f"Num Threads: {num_threads}")
+        num_threads = min(4, math.ceil(orig_weights.shape[2] / 16.))
         new_inst = cls(orig_weights.shape[3], orig_weights.shape[2], False, 'cpu', torch.bfloat16)
         if shallow:
             return new_inst
