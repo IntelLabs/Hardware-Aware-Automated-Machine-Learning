@@ -25,7 +25,7 @@ SQFT fine-tunes **sparse** and **low-precision** LLMs using parameter-efficient 
 
 SparAMX utilizes AMX support on the latest Intel CPUs along with unstructured sparsity to achieve a reduction in _end-to-end_ latency compared to the current PyTorch implementation by applying our technique in linear layers. 
 
-**Authors:** Ahmed F. AbouElhamayed, Jordan Dotzel, Yash Akhauri, Chi-Chih Chang, Sameh Gobriel, J. Pablo Munoz, Vui Seng Chua, Nilesh Jain, Mohamed S. Abdelfattah.
+**Authors:** Ahmed F. AbouElhamayed, Jordan Dotzel, Yash Akhauri, Chi-Chih Chang, Sameh Gobriel, J. Pablo Munoz, Vui Seng Chua, Nilesh Jain, Mohamed S. Abdelfattah  
 **Links:** [Paper]() | [Code](./SparAMX)
 
 ---
@@ -59,7 +59,7 @@ EFTNAS integrates neural architecture search and network pruning to automaticall
 
 ### EZNAS: Evolving Zero Cost Proxies For Neural Architecture Scoring
 **Authors:** Yash Akhauri, J. Pablo Muñoz, Nilesh Jain, Ravi Iyer  
-**Conference:** NeurIPS 2022  
+**Conference:** NeurIPS 2022   
 **Links:** [Paper](https://arxiv.org/abs/2209.07413) | [Code](./EZNAS)  
 
 EZNAS is a genetic programming-driven methodology for automatically discovering Zero-Cost Neural Architecture Scoring Metrics (ZC-NASMs).
@@ -67,8 +67,8 @@ EZNAS is a genetic programming-driven methodology for automatically discovering 
 ---
 
 ### BootstrapNAS: 
-**Authors:** J. Pablo Muñoz, Nikolay Lyalyushkin, Yash Akhauri, Anastasia Senina, Alexander Kozlov, Chaunte Lacewell, Daniel Cummings, Anthony Sarah, Nilesh Jain 
-**Conferences:** AutoML 2022 (Main Track), AAAI 2022 (Practical Deep Learning in the Wild)
+**Authors:** J. Pablo Muñoz, Nikolay Lyalyushkin, Yash Akhauri, Anastasia Senina, Alexander Kozlov, Chaunte Lacewell, Daniel Cummings, Anthony Sarah, Nilesh Jain  
+**Conferences:** AutoML 2022 (Main Track), AAAI 2022 (Practical Deep Learning in the Wild)  
 **Links:** [Paper AutoML](https://proceedings.mlr.press/v188/munoz22a) [Paper AAAI](https://arxiv.org/pdf/2112.10878)| [Code](./BootstrapNAS)  
 
 BootstrapNAS generates weight-sharing super-networks from pre-trained models, and discovers efficient subnetworks.
