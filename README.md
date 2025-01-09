@@ -66,7 +66,7 @@ EZNAS is a genetic programming-driven methodology for automatically discovering 
 
 ---
 
-### BootstrapNAS: 
+### BootstrapNAS: Enabling NAS with Automated Super-Network Generation  
 **Authors:** J. Pablo Muñoz, Nikolay Lyalyushkin, Yash Akhauri, Anastasia Senina, Alexander Kozlov, Chaunte Lacewell, Daniel Cummings, Anthony Sarah, Nilesh Jain  
 **Conferences:** AutoML 2022 (Main Track), AAAI 2022 (Practical Deep Learning in the Wild)  
 **Links:** [Paper AutoML](https://proceedings.mlr.press/v188/munoz22a) [Paper AAAI](https://arxiv.org/pdf/2112.10878)| [Code](./BootstrapNAS)  
