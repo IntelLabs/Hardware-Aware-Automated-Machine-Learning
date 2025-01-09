@@ -25,10 +25,10 @@ index d41bc99ee..f74ee777f 100644
          return self.key_cache[layer_idx], self.value_cache[layer_idx]
  
 diff --git a/src/transformers/modeling_utils.py b/src/transformers/modeling_utils.py
-index 3e3d78908..fb17c952d 100755
+index 3e3d78908..4915644b6 100755
 --- a/src/transformers/modeling_utils.py
 +++ b/src/transformers/modeling_utils.py
-@@ -4024,6 +4024,40 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+@@ -4024,6 +4024,45 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                  gguf_path=gguf_path,
              )
  
@@ -55,21 +55,26 @@ index 3e3d78908..fb17c952d 100755
 +                layer = get_layer_by_key(model, key)
 +                if ".self_attn" in key:
 +                    layer.mask_attn = True
++                    layer.input_layernorm = None
++                    layer.self_attn = None
 +                    logger.warning(
 +                        f"Some weights of MHA module in {layer.__class__.__name__} were not initialized from the model checkpoint at"
 +                        f" {pretrained_model_name_or_path} and the corresponding MHA module is pruned: {key}"
 +                    )
 +                elif ".mlp" in key:
 +                    layer.mask_mlp = True
++                    layer.post_attention_layernorm = None
++                    layer.mlp = None
 +                    logger.warning(
 +                        f"Some weights of MLP module in {layer.__class__.__name__} were not initialized from the model checkpoint at"
 +                        f" {pretrained_model_name_or_path} and the corresponding MLP module is pruned: {key}"
 +                    )
++            torch.cuda.empty_cache()
 +
          # make sure token embedding weights are still tied if needed
          model.tie_weights()
  
-@@ -4403,6 +4437,33 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+@@ -4403,6 +4442,33 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
              }
          else:
              offload_index = None
@@ -103,7 +108,7 @@ index 3e3d78908..fb17c952d 100755
  
          if state_dict is not None:
              # Whole checkpoint
-@@ -4414,6 +4475,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+@@ -4414,6 +4480,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                  remove_prefix_from_model,
                  ignore_mismatched_sizes,
              )
@@ -111,7 +116,7 @@ index 3e3d78908..fb17c952d 100755
  
              # For GGUF models `state_dict` is never set to None as the state dict is always small
              if gguf_path:
-@@ -4485,6 +4547,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+@@ -4485,6 +4552,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                      remove_prefix_from_model,
                      ignore_mismatched_sizes,
                  )
@@ -120,7 +125,7 @@ index 3e3d78908..fb17c952d 100755
                      if is_fsdp_enabled() and not is_local_dist_rank_0() and not is_quantized:
                          for key, param in model_to_load.state_dict().items():
 diff --git a/src/transformers/models/llama/modeling_llama.py b/src/transformers/models/llama/modeling_llama.py
-index 73b6bcd8b..2128f4148 100644
+index 73b6bcd8b..5d68e6c85 100644
 --- a/src/transformers/models/llama/modeling_llama.py
 +++ b/src/transformers/models/llama/modeling_llama.py
 @@ -393,9 +393,9 @@ class LlamaAttention(nn.Module):
@@ -174,7 +179,14 @@ index 73b6bcd8b..2128f4148 100644
  
          if position_embeddings is None:
              logger.warning_once(
-@@ -686,6 +686,8 @@ class LlamaDecoderLayer(nn.Module):
+@@ -680,12 +680,15 @@ class LlamaDecoderLayer(nn.Module):
+     def __init__(self, config: LlamaConfig, layer_idx: int):
+         super().__init__()
+         self.hidden_size = config.hidden_size
++        self.layer_idx = layer_idx
+
+         self.self_attn = LLAMA_ATTENTION_CLASSES[config._attn_implementation](config=config, layer_idx=layer_idx)
+
          self.mlp = LlamaMLP(config)
          self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
          self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -183,7 +195,7 @@ index 73b6bcd8b..2128f4148 100644
  
      def forward(
          self,
-@@ -721,29 +723,32 @@ class LlamaDecoderLayer(nn.Module):
+@@ -721,29 +724,32 @@ class LlamaDecoderLayer(nn.Module):
                  Arbitrary kwargs to be ignored, used for FSDP and other methods that injects code
                  into the model
          """
@@ -238,16 +250,16 @@ index 73b6bcd8b..2128f4148 100644
  
          outputs = (hidden_states,)
  
-@@ -751,6 +756,8 @@ class LlamaDecoderLayer(nn.Module):
+@@ -751,6 +757,8 @@ class LlamaDecoderLayer(nn.Module):
              outputs += (self_attn_weights,)
  
          if use_cache:
 +            if self.mask_attn:
-+                past_key_value.update(None, None, self.self_attn.layer_idx)
++                past_key_value.update(None, None, self.layer_idx)
              outputs += (present_key_value,)
  
          return outputs
-@@ -1023,7 +1030,7 @@ class LlamaModel(LlamaPreTrainedModel):
+@@ -1023,7 +1031,7 @@ class LlamaModel(LlamaPreTrainedModel):
              all_hidden_states += (hidden_states,)
  
          next_cache = next_decoder_cache if use_cache else None
@@ -257,7 +269,7 @@ index 73b6bcd8b..2128f4148 100644
  
          if not return_dict:
 diff --git a/src/transformers/models/qwen2/modeling_qwen2.py b/src/transformers/models/qwen2/modeling_qwen2.py
-index 10c0b6f38..763c5d813 100644
+index 10c0b6f38..aafb914d0 100644
 --- a/src/transformers/models/qwen2/modeling_qwen2.py
 +++ b/src/transformers/models/qwen2/modeling_qwen2.py
 @@ -345,9 +345,9 @@ class Qwen2Attention(nn.Module):
@@ -320,7 +332,15 @@ index 10c0b6f38..763c5d813 100644
  
          attn_output = self.o_proj(attn_output)
  
-@@ -660,6 +660,9 @@ class Qwen2DecoderLayer(nn.Module):
+@@ -648,6 +648,7 @@ class Qwen2DecoderLayer(nn.Module):
+     def __init__(self, config: Qwen2Config, layer_idx: int):
+         super().__init__()
+         self.hidden_size = config.hidden_size
++        self.layer_idx = layer_idx
+
+         if config.sliding_window and config._attn_implementation != "flash_attention_2":
+             logger.warning_once(
+@@ -660,6 +661,9 @@ class Qwen2DecoderLayer(nn.Module):
          self.input_layernorm = Qwen2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
          self.post_attention_layernorm = Qwen2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
  
@@ -330,7 +350,7 @@ index 10c0b6f38..763c5d813 100644
      def forward(
          self,
          hidden_states: torch.Tensor,
-@@ -694,28 +697,31 @@ class Qwen2DecoderLayer(nn.Module):
+@@ -694,28 +698,31 @@ class Qwen2DecoderLayer(nn.Module):
                  into the model
          """
  
@@ -381,16 +401,16 @@ index 10c0b6f38..763c5d813 100644
  
          outputs = (hidden_states,)
  
-@@ -723,6 +729,8 @@ class Qwen2DecoderLayer(nn.Module):
+@@ -723,6 +730,8 @@ class Qwen2DecoderLayer(nn.Module):
              outputs += (self_attn_weights,)
  
          if use_cache:
 +            if self.mask_attn:
-+                past_key_value.update(None, None, self.self_attn.layer_idx)
++                past_key_value.update(None, None, self.layer_idx)
              outputs += (present_key_value,)
  
          return outputs
-@@ -999,7 +1007,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
+@@ -999,7 +1008,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
              all_hidden_states += (hidden_states,)
  
          next_cache = next_decoder_cache if use_cache else None

@@ -164,12 +164,11 @@ python run_multipruner.py \
 
 #### Baichuan2-7B-Base
 
-To enable pruning of Query, Key, and Value, we have deconstructed the linear module `W_pack` (which combines QKV into a single linear layer) in [Baichuan2-7B-Base](https://huggingface.co/baichuan-inc/Baichuan2-7B-Base). 
-The deconstructed model: [IntelLabs/Baichuan2-7B-Base-split_qkv](https://huggingface.co/IntelLabs/Baichuan2-7B-Base-split_qkv).
+To enable pruning of Query, Key, and Value, we have deconstructed the linear module `W_pack` (which combines QKV into a single linear layer) in [Baichuan2-7B-Base](https://huggingface.co/baichuan-inc/Baichuan2-7B-Base).
 
 ```bash
 python run_multipruner.py \
-  --model_path IntelLabs/Baichuan2-7B-Base-split_qkv \
+  --model_path <path to processed baichuan model> \
   --output_path <path to pruning results> \
   --weight_reorder \
   --do_prune \
@@ -186,11 +185,9 @@ python run_multipruner.py \
 
 #### Baichuan2-13B-Base
 
-Similar to Baichuan2-7B-Base, the deconstructed model: [IntelLabs/Baichuan2-13B-Base-split_qkv](https://huggingface.co/IntelLabs/Baichuan2-13B-Base-split_qkv).
-
 ```bash
 python run_multipruner.py \
-  --model_path IntelLabs/Baichuan2-13B-Base-split_qkv \
+  --model_path <path to processed baichuan model> \
   --output_path <path to pruning results> \
   --do_prune \
   --target_ratio <pruning ratio> \
