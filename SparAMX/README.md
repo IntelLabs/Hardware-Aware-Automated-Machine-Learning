@@ -9,7 +9,7 @@ This repo contains the code for **SparAMX**, a set of open-source customized spa
 | <img src="Videos/stock.gif" alt="Stock" width="100%"> | <img src="Videos/sparamx.gif" alt="TLD" width="100%"> |
 
 # torch-custom-linear
-custom implementation of linear through torch extension
+Custom implementation of linear through torch extension
 
 ### Dependency
 ```pip install -r requirements.txt```
