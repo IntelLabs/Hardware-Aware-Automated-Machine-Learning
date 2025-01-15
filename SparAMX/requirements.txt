@@ -96,7 +96,7 @@ sympy==1.13.2
 tf2onnx==1.16.1
 tokenizers==0.19.1
 torch==2.3.1
-tornado==6.4.1
+tornado==6.4.2
 tqdm==4.66.5
 traitlets==5.14.3
 transformers==4.44.2
