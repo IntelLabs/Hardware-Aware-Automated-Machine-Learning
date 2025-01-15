@@ -55,7 +55,7 @@ nvidia-cusparse-cu12==12.1.0.106
 nvidia-nccl-cu12==2.20.5
 nvidia-nvjitlink-cu12==12.6.20
 nvidia-nvtx-cu12==12.1.105
-onnx==1.16.2
+onnx==1.17.0
 onnxconverter-common==1.14.0
 onnxruntime==1.19.2
 onnxruntime-tools==1.7.0
