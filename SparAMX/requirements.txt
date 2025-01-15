@@ -103,7 +103,7 @@ transformers==4.44.2
 typing_extensions==4.12.2
 tzdata==2024.1
 urllib3==2.2.2
-virtualenv==20.26.4
+virtualenv==20.26.6
 wcwidth==0.2.13
 xmltodict==0.13.0
 xxhash==3.5.0
