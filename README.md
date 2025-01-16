@@ -4,7 +4,7 @@ Welcome to the repository that showcases advanced neural architecture discovery 
 
 ## Featured Research Papers 📚
 
-### Fine-Grained Training-Free Structure Removal in Foundation Models
+### MultiPruner: Fine-Grained Training-Free Structure Removal in Foundation Models
 **Authors:** J. Pablo Muñoz, Jinjie Yuan, Nilesh Jain  
 **Links:** [Paper]() | [Code](./MultiPruner)  
 
