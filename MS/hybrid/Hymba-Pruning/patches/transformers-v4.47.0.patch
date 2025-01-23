@@ -1,0 +1,93 @@
+diff --git a/src/transformers/modeling_utils.py b/src/transformers/modeling_utils.py
+index dae29111c..768c6d96d 100755
+--- a/src/transformers/modeling_utils.py
++++ b/src/transformers/modeling_utils.py
+@@ -4280,6 +4280,37 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+                     gguf_path=gguf_path,
+                     weights_only=weights_only,
+                 )
++            
++            def get_layer_by_key(model, key, layer_depth=3):
++                # Split the key into parts
++                parts = key.split('.')
++                
++                # Only keep the parts up to the specified layer depth
++                layer_parts = parts[:layer_depth]
++                
++                # Traverse the model using the layer parts
++                module = model
++                for part in layer_parts:
++                    if hasattr(module, part):
++                        module = getattr(module, part)
++                    else:
++                        raise AttributeError(f"Module does not have attribute '{part}'")
++                
++                return module
++
++            if len(missing_keys) > 0:
++                # for compressed hymba from Mamba-Shedder
++                for key in missing_keys:
++                    layer = get_layer_by_key(model, key)
++                    if ".mamba" in key:
++                        layer.mask_hymba_block = True
++                        layer.mamba = None
++                        logger.warning(
++                            f"Some weights of Hymba block in {layer.__class__.__name__} were not initialized from the model checkpoint at"
++                            f" {pretrained_model_name_or_path} and the corresponding Hymba block is pruned: {key}"
++                        )
++                torch.cuda.empty_cache()
++
+ 
+         # make sure token embedding weights are still tied if needed
+         model.tie_weights()
+@@ -4674,6 +4705,34 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+             }
+         else:
+             offload_index = None
++        
++        def module_reshape(state_dict):
++            for param_name, param in state_dict.items():
++                if ".bias" in param_name:
++                    continue
++                tensor_name = param_name
++                splits = tensor_name.split(".")
++                if len(splits) > 1:
++                    module = model_to_load
++                    parent = None
++                    for split in splits[:-1]:
++                        new_module = getattr(module, split)
++                        if new_module is None:
++                            raise ValueError(f"{module} has no attribute {split}.")
++                        parent = module
++                        module = new_module
++                    tensor_name = splits[-1]
++                    old_value = getattr(module, tensor_name)
++                    if old_value.shape != param.shape and isinstance(module, nn.Linear):
++                        new_module = torch.nn.Linear(
++                            param.shape[1],
++                            param.shape[0],
++                            bias=module.bias is not None,
++                            dtype=module.weight.dtype,
++                            device=module.weight.device
++                        )
++                        setattr(parent, splits[-2], new_module)
++
+ 
+         if state_dict is not None:
+             # Whole checkpoint
+@@ -4685,6 +4744,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+                 remove_prefix_from_model,
+                 ignore_mismatched_sizes,
+             )
++            module_reshape(state_dict)
+ 
+             # For GGUF models `state_dict` is never set to None as the state dict is always small
+             if gguf_path:
+@@ -4766,6 +4826,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
+                     remove_prefix_from_model,
+                     ignore_mismatched_sizes,
+                 )
++                module_reshape(state_dict)
+                 if low_cpu_mem_usage:
+                     if is_fsdp_enabled() and not is_local_dist_rank_0() and not is_quantized:
+                         for key, param in model_to_load.state_dict().items():

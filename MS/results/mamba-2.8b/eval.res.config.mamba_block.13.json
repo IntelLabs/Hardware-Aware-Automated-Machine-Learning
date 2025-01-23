@@ -1,0 +1,12 @@
+{
+    "total_params": 2768345600,
+    "7cs_acc_avg": 53.800000000000004,
+    "openbookqa": 33.2,
+    "winogrande": 61.1,
+    "arc_challenge": 32.0,
+    "arc_easy": 62.7,
+    "piqa": 71.0,
+    "hellaswag": 57.599999999999994,
+    "lambada_openai": 58.9,
+    "lambada_openai_ppl": 7.50530338198477
+}

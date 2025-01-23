@@ -1,0 +1,9 @@
+{
+    "total_params": 1522797824,
+    "5cs_acc_avg": 60.5,
+    "arc_challenge": 43.2,
+    "arc_easy": 74.2,
+    "hellaswag": 49.2,
+    "piqa": 74.3,
+    "winogrande": 61.5
+}
