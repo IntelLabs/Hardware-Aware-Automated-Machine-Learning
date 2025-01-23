@@ -214,9 +214,9 @@ MultiPruner benefits from the following work:
 If you find MultiPruner's code and paper helpful, please kindly cite:
 ```bibtex
 @article{munoz2025multipruner,
-  title = {Fine-Grained Training-Free Structure Removal in Foundation Models},
+  title = {MultiPruner: Balanced Structure Removal in Foundation Models},
   author = {J. Pablo Munoz and Jinjie Yuan and Nilesh Jain},
   year = {2025},
-  url = {}
+  url = {https://arxiv.org/abs/2501.09949}
 }
 ```

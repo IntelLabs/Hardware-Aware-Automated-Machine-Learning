@@ -4,9 +4,18 @@ Welcome to the repository that showcases advanced neural architecture discovery 
 
 ## Featured Research Papers 📚
 
-### MultiPruner: Fine-Grained Training-Free Structure Removal in Foundation Models
+### Low-Rank Adapters Meet Neural Architecture Search for LLM Compression
 **Authors:** J. Pablo Muñoz, Jinjie Yuan, Nilesh Jain  
-**Links:** [Paper]() | [Code](./MultiPruner)  
+**Links:** [Paper]() | [LoNAS' Code](./LoNAS) | [SQFT's Code](./SQFT) | [Shears' Code](./Shears) 
+
+This retrospective paper comprehensively discusses innovative approaches that synergize low-rank representations with Neural Architecture Search (NAS) techniques, particularly weight-sharing super-networks. Robust solutions for compressing and fine-tuning large pre-trained models are developed by integrating these methodologies.
+
+
+---
+
+### MultiPruner: Balanced Structure Removal in Foundation Models
+**Authors:** J. Pablo Muñoz, Jinjie Yuan, Nilesh Jain  
+**Links:** [Paper](https://arxiv.org/abs/2501.09949) | [Code](./MultiPruner)  
 
 MultiPruner is a training-free pruning approach for large pre-trained models that iteratively compresses residual blocks, MLP channels, and MHA heads, achieving superior zero-shot accuracy and model compression.
 
@@ -15,7 +24,7 @@ MultiPruner is a training-free pruning approach for large pre-trained models tha
 ### SQFT: Low-cost Model Adaptation in Low-precision Sparse Foundation Models
 **Authors:** J. Pablo Muñoz, Jinjie Yuan, Nilesh Jain  
 **Conference:** EMNLP 2024 Findings  
-**Links:** [Paper](https://arxiv.org/abs/2410.03750) | [Code](./SQFT)  
+**Links:** [Paper](https://aclanthology.org/2024.findings-emnlp.749.pdf) | [Code](./SQFT)  
 
 SQFT fine-tunes **sparse** and **low-precision** LLMs using parameter-efficient techniques, merging sparse weights with low-rank adapters while maintaining sparsity and accuracy, and handling quantized weights and adapters of different precisions.
 
@@ -33,7 +42,7 @@ SparAMX utilizes AMX support on the latest Intel CPUs along with unstructured sp
 ### Shears: Unstructured Sparsity with Neural Low-rank Adapter Search
 **Authors:** J. Pablo Muñoz, Jinjie Yuan, Nilesh Jain  
 **Conference:** NAACL 2024 (Industry Track)  
-**Links:** [Paper](https://arxiv.org/abs/2404.10934) | [Code](./Shears)  
+**Links:** [Paper](https://aclanthology.org/2024.naacl-industry.34.pdf) | [Code](./Shears)  
 
 Shears integrates cost-effective **sparsity** and **Neural Low-rank adapter Search (NLS)** to further improve the efficiency of Parameter-Efficient Fine-Tuning (PEFT) approaches.
 
