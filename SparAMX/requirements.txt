@@ -1,6 +1,6 @@
 accelerate==0.31.0
 aiohappyeyeballs==2.4.0
-aiohttp==3.10.5
+aiohttp==3.10.11
 aiosignal==1.3.1
 asttokens==2.4.1
 attrs==24.2.0
@@ -55,7 +55,7 @@ nvidia-cusparse-cu12==12.1.0.106
 nvidia-nccl-cu12==2.20.5
 nvidia-nvjitlink-cu12==12.6.20
 nvidia-nvtx-cu12==12.1.105
-onnx==1.16.2
+onnx==1.17.0
 onnxconverter-common==1.14.0
 onnxruntime==1.19.2
 onnxruntime-tools==1.7.0
@@ -96,14 +96,14 @@ sympy==1.13.2
 tf2onnx==1.16.1
 tokenizers==0.19.1
 torch==2.3.1
-tornado==6.4.1
+tornado==6.4.2
 tqdm==4.66.5
 traitlets==5.14.3
 transformers==4.44.2
 typing_extensions==4.12.2
 tzdata==2024.1
 urllib3==2.2.2
-virtualenv==20.26.4
+virtualenv==20.26.6
 wcwidth==0.2.13
 xmltodict==0.13.0
 xxhash==3.5.0
