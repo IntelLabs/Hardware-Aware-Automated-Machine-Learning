@@ -4,8 +4,18 @@ Welcome to the repository that showcases advanced neural architecture discovery 
 
 ## Featured Research Papers 📚
 
+### Mamba-Shedder: Post-Transformer Compression for Efficient Selective Structured State Space Models 
+**Authors:** J. Pablo Muñoz, Jinjie Yuan, Nilesh Jain  
+**Conference:** NAACL 2025 - Main Track  
+**Links:** [Paper]() | [Code](./Mamba-Shedder)  
+
+This paper explores the compression of Selective Structured State Space Models, particularly Mamba and its hybrids. We study the sensitivity of these models to the removal of selected components at different granularities to reduce the model size and computational overhead, thus improving their efficiency while maintaining accuracy.
+
+---
+
 ### Low-Rank Adapters Meet Neural Architecture Search for LLM Compression
 **Authors:** J. Pablo Muñoz, Jinjie Yuan, Nilesh Jain  
+**Conference:** AAAI 2025 - Workshop on Connecting Low-rank Representations in AI  
 **Links:** [Paper]() | [LoNAS' Code](./LoNAS) | [SQFT's Code](./SQFT) | [Shears' Code](./Shears) 
 
 This retrospective paper comprehensively discusses innovative approaches that synergize low-rank representations with Neural Architecture Search (NAS) techniques, particularly weight-sharing super-networks. Robust solutions for compressing and fine-tuning large pre-trained models are developed by integrating these methodologies.

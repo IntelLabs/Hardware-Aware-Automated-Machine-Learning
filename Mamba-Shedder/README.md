@@ -23,6 +23,8 @@ Compressed models by Mamba-Shedder:
 | [mamba2-2.7b](https://huggingface.co/state-spaces/mamba2-2.7b)     | 22 SSMs            | ✘               | 96%           | [Link]()        | ~1.2x             |
 | [mamba2-2.7b](https://huggingface.co/state-spaces/mamba2-2.7b)     | 22 SSMs            | ✔               | 99%           | [Link]() | ~1.2x             |
 
+<sup>*</sup> *Mamba-Shedder pruned models are currently under internal review and will be released soon.*
+
 ## Setup
 
 Use the following instructions to create a virtual environment with the required dependencies.
@@ -129,10 +131,16 @@ python eval.py --model_path <path to compressed model>
 ## Citation
 If you find Mamba-Shedder's code and paper helpful, please kindly cite:
 ```bibtex
-@article{munoz2025mambashedder,
+@inproceedings{munoz2025mambashedder,
   title = {Mamba-Shedder: Post-Transformer Compression for Efficient Selective Structured State Space Models},
-  author = {J. Pablo Munoz and Jinjie Yuan and Nilesh Jain},
-  journal = {},
-  year = {2025}
+  author = {Mu{\~n}oz, J. Pablo  and
+      Yuan, Jinjie  and
+      Jain, Nilesh},
+  booktitle = "Proceedings of the 2025 Annual Conference of the Nations of the Americas Chapter of the Association for Computational Linguistics (NAACL 2025)",
+    month = jun,
+    year = "2025",
+    address = "Albuquerque, New Mexico",
+    publisher = "Association for Computational Linguistics",
+    url = "",
 }
 ```
