@@ -1,6 +1,6 @@
 # Mamba-Shedder
 
-Official implementation of [Mamba-Shedder: Post-Transformer Compression for Efficient Selective Structured State Space Models]().
+Official implementation of [Mamba-Shedder: Post-Transformer Compression for Efficient Selective Structured State Space Models](https://arxiv.org/abs/2501.17088).
 
 This repo contains the code for Mamba-Shedder, which explores the compression of the new Mamba-series architectures (and their hybrids). 
 We study the sensitivity of these models to the removal of selected components at different granularities to reduce model size and computational overhead, thereby improving their efficiency while maintaining accuracy.
