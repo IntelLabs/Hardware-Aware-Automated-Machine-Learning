@@ -19,11 +19,11 @@ Compressed models by Mamba-Shedder:
 |--------------------------------------------------------------------|--------------------|-----------------|---------------|----------------------------------------------------------------------------------------|-------------------|
 | [Hymba-1.5B-Base](https://huggingface.co/nvidia/Hymba-1.5B-Base)   | 7 Hymba Blocks     | ✘               | 97%           | [Link]()                 | ~1.2x             |
 | [Hymba-1.5B-Base](https://huggingface.co/nvidia/Hymba-1.5B-Base)   | 7 Hymba Blocks     | ✔               | 99%           | [Link]()          | ~1.2x             |
-| [mamba-2.8b](https://huggingface.co/state-spaces/mamba-2.8b)       | 14 Mamba Blocks    | ✘               | 90%           | [Link]()                      | ~1.3x             |
-| [mamba2-2.7b](https://huggingface.co/state-spaces/mamba2-2.7b)     | 22 SSMs            | ✘               | 96%           | [Link]()        | ~1.2x             |
-| [mamba2-2.7b](https://huggingface.co/state-spaces/mamba2-2.7b)     | 22 SSMs            | ✔               | 99%           | [Link]() | ~1.2x             |
+| [mamba-2.8b](https://huggingface.co/state-spaces/mamba-2.8b)       | 14 Mamba Blocks    | ✘               | 90%           | [Link](https://huggingface.co/IntelLabs/Mamba-Shedder-Mamba-2.2B)                      | ~1.3x             |
+| [mamba2-2.7b](https://huggingface.co/state-spaces/mamba2-2.7b)     | 22 SSMs            | ✘               | 96%           | [Link](https://huggingface.co/IntelLabs/Mamba-Shedder-Mamba2-2.7B-Pruned-22SSM)        | ~1.2x             |
+| [mamba2-2.7b](https://huggingface.co/state-spaces/mamba2-2.7b)     | 22 SSMs            | ✔               | 99%           | [Link](https://huggingface.co/IntelLabs/Mamba-Shedder-Mamba2-2.7B-Pruned-22SSM-Alpaca) | ~1.2x             |
 
-<sup>*</sup> *Mamba-Shedder pruned models are currently under internal review and will be released soon.*
+<sup>*</sup> *Mamba-Shedder-Hymba pruned models are currently under internal review and will be released soon.*
 
 ## Setup
 
