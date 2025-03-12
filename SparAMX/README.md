@@ -35,3 +35,17 @@ A file `experiments.csv` is generated. Modify it if needed. After that run
 
 Your results will be saved inside folder `experiment_results/YYYY-MM-DD_HH-MM-SS`.
 
+## Citation
+If you find our SparAMX code and paper helpful, please kindly cite:
+```bibtex
+@misc{abouelhamayed2025sparamxacceleratingcompressedllms,
+      title={SparAMX: Accelerating Compressed LLMs Token Generation on AMX-powered CPUs}, 
+      author={Ahmed F. AbouElhamayed and Jordan Dotzel and Yash Akhauri and Chi-Chih Chang and Sameh Gobriel and J. Pablo Muñoz and Vui Seng Chua and Nilesh Jain and Mohamed S. Abdelfattah},
+      year={2025},
+      eprint={2502.12444},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2502.12444}, 
+}
+'''
+
