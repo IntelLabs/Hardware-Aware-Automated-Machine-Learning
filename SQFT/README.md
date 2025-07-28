@@ -12,6 +12,7 @@ Specifically, the highlights of SQFT include:
 Please refer to our paper for more details.
 
 ## News
+- **[2025.07.02]** SQFT's NLS algorithm is now supported in [OpenVINO NNCF](https://github.com/openvinotoolkit/nncf) for quantization-aware tuning to improve accuracy on downstream Tasks, including new heuristics. More details can be found [here](https://github.com/openvinotoolkit/nncf/tree/v2.17.0/examples/llm_compression/torch/downstream_qat_with_nls).
 - **[2024.09.24]**  **SQFT** paper has been released ([link](https://arxiv.org/pdf/2410.03750)) and **accepted at EMNLP 2024 Findings**. :books:
 - **[2024.09.24]** Release the code for **SQFT**. :tada:
 
@@ -383,6 +384,15 @@ lm_eval --model hf \
 ``````
 
 </details>
+
+## New Heuristic
+
+In addition to the super simple heuristic using the median config, we have designed new heuristics based on training loss and activation counts during training. Specifically, we have:
+
+- **Loss-based Sub-adapter**: This heuristic selects sub-adapters based on the loss information recorded during training.
+- **Activation-based Sub-adapter**: This heuristic selects sub-adapters based on the most frequently activated configurations during training.
+
+For more details, please refer to the script [here](https://github.com/openvinotoolkit/nncf/blob/v2.17.0/examples/llm_compression/torch/downstream_qat_with_nls/main.py).
 
 ## Released Fine-tuned Models 🤗
 
