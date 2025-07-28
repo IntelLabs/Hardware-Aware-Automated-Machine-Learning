@@ -192,6 +192,17 @@ Please refer to `running_commands` for all commands related to reproducing the p
     pages = "10760--10776",
 }
 ```
+```bibtex
+@inproceedings{munoz2025lowrank,
+    title=Low-Rank Adapters Meet Neural Architecture Search for LLM Compression,
+    author="Munoz, J. Pablo  and
+      Yuan, Jinjie  and
+      Jain, Nilesh",,
+    booktitle={AAAI'25 workshop on CoLoRAI - Connecting Low-Rank Representations in AI},
+    year={2025},
+    url={https://arxiv.org/abs/2501.16372}
+}
+```
 
 
 ## Acknowledgement

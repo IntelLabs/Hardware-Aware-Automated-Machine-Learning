@@ -432,11 +432,11 @@ lm_eval --model hf \
 [//]: # (https://huggingface.co/IntelLabs/sqft-qa-sparsepeft-llama-3-8b-50-gptq-gsm8k-heu)
 
 ## Citation
-If you find SQFT's code and paper helpful, please kindly cite:
+If you find SQFT's code and papers helpful, please kindly cite:
 ```bibtex
 @inproceedings{munoz-etal-2024-sqft,
     title = "{SQFT}: Low-cost Model Adaptation in Low-precision Sparse Foundation Models",
-    author = "Munoz, Juan Pablo  and
+    author = "Munoz, J. Pablo  and
       Yuan, Jinjie  and
       Jain, Nilesh",
     editor = "Al-Onaizan, Yaser  and
@@ -449,5 +449,16 @@ If you find SQFT's code and paper helpful, please kindly cite:
     publisher = "Association for Computational Linguistics",
     url = "https://aclanthology.org/2024.findings-emnlp.749",
     pages = "12817--12832",
+}
+```
+```bibtex
+@inproceedings{munoz2025lowrank,
+    title=Low-Rank Adapters Meet Neural Architecture Search for LLM Compression,
+    author="Munoz, J. Pablo  and
+      Yuan, Jinjie  and
+      Jain, Nilesh",,
+    booktitle={AAAI'25 workshop on CoLoRAI - Connecting Low-Rank Representations in AI},
+    year={2025},
+    url={https://arxiv.org/abs/2501.16372}
 }
 ```

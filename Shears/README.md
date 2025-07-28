@@ -230,7 +230,7 @@ supernet.extract_and_save_active_sub_adapter(super_adapter_dir=ADAPTER_MODEL_PAT
 We released some examples of the extracted heuristic sub-adapters. Refer to them in [Table](#released-models-).
 
 ## Citation
-If you find our Shears code and paper helpful, please kindly cite:
+If you find our Shears code and papers helpful, please kindly cite:
 ```bibtex
 @inproceedings{munoz-etal-2024-shears,
     title = "Shears: Unstructured Sparsity with Neural Low-rank Adapter Search",
@@ -249,6 +249,17 @@ If you find our Shears code and paper helpful, please kindly cite:
     url = "https://aclanthology.org/2024.naacl-industry.34",
     doi = "10.18653/v1/2024.naacl-industry.34",
     pages = "395--405",
+}
+```
+```bibtex
+@inproceedings{munoz2025lowrank,
+    title=Low-Rank Adapters Meet Neural Architecture Search for LLM Compression,
+    author="Munoz, J. Pablo  and
+      Yuan, Jinjie  and
+      Jain, Nilesh",,
+    booktitle={AAAI'25 workshop on CoLoRAI - Connecting Low-Rank Representations in AI},
+    year={2025},
+    url={https://arxiv.org/abs/2501.16372}
 }
 ```
 
