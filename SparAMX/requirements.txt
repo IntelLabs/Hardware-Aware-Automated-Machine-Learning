@@ -32,7 +32,7 @@ ipython==8.27.0
 jedi==0.19.1
 Jinja2==3.1.5
 jupyter_client==8.6.2
-jupyter_core==5.7.2
+jupyter_core==5.8.1
 kiwisolver==1.4.7
 MarkupSafe==2.1.5
 matplotlib==3.9.2
