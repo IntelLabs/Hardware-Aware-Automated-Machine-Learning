@@ -90,7 +90,6 @@ seaborn==0.13.2
 sentencepiece==0.2.1
 setuptools==78.1.1
 six==1.16.0
-sparse_linear==0.0.0
 stack-data==0.6.3
 sympy==1.13.2
 tf2onnx==1.16.1
